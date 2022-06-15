@@ -70,14 +70,11 @@ XTmrCtr Timer;
 #define ACQ_PACKET_SIZE (ACQ_PACKET_SAMPLES * sizeof(float))
 #define ACQ_PACKET_HALF_SIZE (ACQ_PACKET_SIZE / 2)
 
-#define STFT_PACKET_VALUES 130
+#define STFT_PACKET_VALUES ACQ_PACKET_SAMPLES
 #define STFT_PACKET_SIZE (STFT_PACKET_VALUES * sizeof(short))
 #define STFT_FRAME_PACKETS 124
 #define STFT_FRAME_HALF_PACKETS (STFT_FRAME_PACKETS / 2)
 #define STFT_FRAME_SIZE (STFT_FRAME_PACKETS * STFT_PACKET_SIZE)
-
-#define STFT_DISCARD_VALUES (ACQ_PACKET_SAMPLES - STFT_PACKET_VALUES)
-#define STFT_DISCARD_SIZE (STFT_DISCARD_VALUES * sizeof(short))
 
 #define SPEECH_MODEL_INPUT_WIDTH 129
 #define SPEECH_MODEL_VECTOR_VALUES 8
@@ -99,13 +96,12 @@ int main() {
     Status = XTmrCtr_Initialize(&Timer, XPAR_TMRCTR_0_DEVICE_ID);
 
 	u8* RxBdSpace = START;
-	u8* TxBdSpace = RxBdSpace + ALIGN(XAxiDma_BdRingMemCalc(XAXIDMA_BD_MINIMUM_ALIGNMENT, 2));
+	u8* TxBdSpace = RxBdSpace + ALIGN(XAxiDma_BdRingMemCalc(XAXIDMA_BD_MINIMUM_ALIGNMENT, 1));
 
 	u8 *AcqBufferPtr = TxBdSpace + ALIGN(XAxiDma_BdRingMemCalc(XAXIDMA_BD_MINIMUM_ALIGNMENT, 2));
 	u8 *StftTxBufferPtr = AcqBufferPtr + ALIGN(ACQ_PACKET_SIZE);
 	u8 *StftRxBufferPtr = StftTxBufferPtr + ALIGN(ACQ_PACKET_SIZE);
-	u8 *StftRxDiscardBufferPtr = StftRxBufferPtr + ALIGN(STFT_FRAME_SIZE);
-	u8 *Dram0BufferPtr = StftRxDiscardBufferPtr + ALIGN(STFT_DISCARD_SIZE);
+	u8 *Dram0BufferPtr = StftRxBufferPtr + ALIGN(STFT_FRAME_SIZE);
 
 	XAxiDma_Config *AcqCfgPtr = XAxiDma_LookupConfig(XPAR_ACQUISITION_AXI_DMA_0_DEVICE_ID);
 	Status = XAxiDma_CfgInitialize(&AcqAxiDma, AcqCfgPtr);
@@ -124,7 +120,7 @@ int main() {
 	XAxiDma_BdRingSetCoalesce(RxRingPtr, 1, 0);
 	XAxiDma_BdRingSetCoalesce(TxRingPtr, 1, 0);
 
-	Status = XAxiDma_BdRingCreate(RxRingPtr, (UINTPTR) RxBdSpace, (UINTPTR) RxBdSpace, XAXIDMA_BD_MINIMUM_ALIGNMENT, 2);
+	Status = XAxiDma_BdRingCreate(RxRingPtr, (UINTPTR) RxBdSpace, (UINTPTR) RxBdSpace, XAXIDMA_BD_MINIMUM_ALIGNMENT, 1);
 	Status = XAxiDma_BdRingCreate(TxRingPtr, (UINTPTR) TxBdSpace, (UINTPTR) TxBdSpace, XAXIDMA_BD_MINIMUM_ALIGNMENT, 2);
 
 	XAxiDma_Bd BdTemplate;
@@ -185,24 +181,21 @@ int main() {
 
 
 		XAxiDma_Bd *RxBdHeadPtr;
-		Status = XAxiDma_BdRingAlloc(RxRingPtr, 2, &RxBdHeadPtr);
+		Status = XAxiDma_BdRingAlloc(RxRingPtr, 1, &RxBdHeadPtr);
 
 		XAxiDma_Bd *RxBdPtr = RxBdHeadPtr;
-		for (size_t i = 0; i < 2; i++) {
-			Status = XAxiDma_BdSetBufAddr(RxBdPtr, (UINTPTR) (i ? StftRxDiscardBufferPtr : StftRxBufferPtr + stft_packet * STFT_PACKET_SIZE));
-			Status = XAxiDma_BdSetLength(RxBdPtr, i ? STFT_DISCARD_SIZE: STFT_PACKET_SIZE, RxRingPtr->MaxTransferLen);
 
-			XAxiDma_BdSetCtrl(RxBdPtr, 0);
-			XAxiDma_BdSetId(RxBdPtr, i);
+		Status = XAxiDma_BdSetBufAddr(RxBdPtr, (UINTPTR) (StftRxBufferPtr + stft_packet * STFT_PACKET_SIZE));
+		Status = XAxiDma_BdSetLength(RxBdPtr, STFT_PACKET_SIZE, RxRingPtr->MaxTransferLen);
 
-			RxBdPtr = (XAxiDma_Bd *) XAxiDma_BdRingNext(RxRingPtr, RxBdPtr);
-		}
+		XAxiDma_BdSetCtrl(RxBdPtr, 0);
+		XAxiDma_BdSetId(RxBdPtr, 0);
 
-		Status = XAxiDma_BdRingToHw(RxRingPtr, 2, RxBdHeadPtr);
+		Status = XAxiDma_BdRingToHw(RxRingPtr, 1, RxBdHeadPtr);
 
 
 
-		while (XAxiDma_BdRingFromHw(RxRingPtr, XAXIDMA_ALL_BDS, &RxBdHeadPtr) != 2 ||
+		while (XAxiDma_BdRingFromHw(RxRingPtr, XAXIDMA_ALL_BDS, &RxBdHeadPtr) != 1 ||
 				XAxiDma_BdRingFromHw(TxRingPtr, XAXIDMA_ALL_BDS, &TxBdHeadPtr) != 2)
 			;
 
@@ -211,7 +204,7 @@ int main() {
 		//BdSts = XAxiDma_BdGetSts(BdPtr);
 
 		Status = XAxiDma_BdRingFree(TxRingPtr, 2, TxBdHeadPtr);
-		Status = XAxiDma_BdRingFree(RxRingPtr, 2, RxBdHeadPtr);
+		Status = XAxiDma_BdRingFree(RxRingPtr, 1, RxBdHeadPtr);
 
 		if (stft_packet < STFT_FRAME_HALF_PACKETS) {
 			u8 *Dram0BasePtr = Dram0BufferPtr + (stft_packet + STFT_FRAME_HALF_PACKETS) * SPEECH_MODEL_INPUT_LINE_SIZE;
@@ -220,7 +213,7 @@ int main() {
 			memset((void* )Dram0BasePtr, 0, SPEECH_MODEL_INPUT_LINE_SIZE);
 
 			for (size_t i = 0; i < SPEECH_MODEL_INPUT_WIDTH; i++) {
-				((short *)Dram0BasePtr)[i * SPEECH_MODEL_VECTOR_VALUES] = ((short *)StftRxBasePtr)[i];
+				((short *)Dram0BasePtr)[i * SPEECH_MODEL_VECTOR_VALUES] = ((short *)StftRxBasePtr)[STFT_PACKET_VALUES - (i + 1)];
 			}
 
 			Dram0BasePtr = Dram0BufferPtr + stft_packet * SPEECH_MODEL_INPUT_LINE_SIZE;
@@ -229,7 +222,7 @@ int main() {
 			memset((void* )Dram0BasePtr, 0, SPEECH_MODEL_INPUT_LINE_SIZE);
 
 			for (size_t i = 0; i < SPEECH_MODEL_INPUT_WIDTH; i++) {
-				((short *)Dram0BasePtr)[i * SPEECH_MODEL_VECTOR_VALUES] = ((short *)StftRxBasePtr)[i];
+				((short *)Dram0BasePtr)[i * SPEECH_MODEL_VECTOR_VALUES] = ((short *)StftRxBasePtr)[STFT_PACKET_VALUES - (i + 1)];
 			}
 		}
 		else {
@@ -239,7 +232,7 @@ int main() {
 			memset((void* )Dram0BasePtr, 0, SPEECH_MODEL_INPUT_LINE_SIZE);
 
 			for (size_t i = 0; i < SPEECH_MODEL_INPUT_WIDTH; i++) {
-				((short *)Dram0BasePtr)[i * SPEECH_MODEL_VECTOR_VALUES] = ((short *)StftRxBasePtr)[i];
+				((short *)Dram0BasePtr)[i * SPEECH_MODEL_VECTOR_VALUES] = ((short *)StftRxBasePtr)[STFT_PACKET_VALUES - (i + 1)];
 			}
 
 			Dram0BasePtr = Dram0BufferPtr + (stft_packet - STFT_FRAME_HALF_PACKETS) * SPEECH_MODEL_INPUT_LINE_SIZE;
@@ -248,7 +241,7 @@ int main() {
 			memset((void* )Dram0BasePtr, 0, SPEECH_MODEL_INPUT_LINE_SIZE);
 
 			for (size_t i = 0; i < SPEECH_MODEL_INPUT_WIDTH; i++) {
-				((short *)Dram0BasePtr)[i * SPEECH_MODEL_VECTOR_VALUES] = ((short *)StftRxBasePtr)[i];
+				((short *)Dram0BasePtr)[i * SPEECH_MODEL_VECTOR_VALUES] = ((short *)StftRxBasePtr)[STFT_PACKET_VALUES - (i + 1)];
 			}
 		}
 
