@@ -1,9 +1,9 @@
 # Speech Robot
 
 ```
-./mill rtl.run -a ./arch/artya7100t.tarch -d 128 -s true -t build
+tensil rtl -a ./arch/speech_commands.tarch -d 128 -s true -t build
 ```
 
 ```
-./mill compiler.run -a ./arch/artya7100t.tarch -m ./models/speech_commands.onnx -o "dense_3"
+tensil compile -a ./arch/speech_commands.tarch -m ./model/speech_commands.onnx -o "dense_3"
 ```
