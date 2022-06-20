@@ -40,7 +40,7 @@ if { [string first $scripts_vivado_version $current_vivado_version] == -1 } {
 
 # The design that will be created by this Tcl script contains the following 
 # module references:
-# adcs747x_to_axism, hann_window_to_axism, top_artya7100t
+# adcs747x_to_axism, hann_window_to_axism, top_speech_commands
 
 # Please add the sources of those modules before sourcing this Tcl script.
 
@@ -178,7 +178,7 @@ if { $bCheckModules == 1 } {
    set list_check_mods "\ 
 adcs747x_to_axism\
 hann_window_to_axism\
-top_artya7100t\
+top_speech_commands\
 "
 
    set list_mods_missing ""
@@ -419,27 +419,27 @@ proc create_hier_cell_tcu { parentCell nameHier } {
    CONFIG.c_sg_length_width {26} \
  ] $axi_dma_0
 
-  # Create instance: top_artya7100t_0, and set properties
-  set block_name top_artya7100t
-  set block_cell_name top_artya7100t_0
-  if { [catch {set top_artya7100t_0 [create_bd_cell -type module -reference $block_name $block_cell_name] } errmsg] } {
+  # Create instance: top_speech_commands_0, and set properties
+  set block_name top_speech_commands
+  set block_cell_name top_speech_commands_0
+  if { [catch {set top_speech_commands_0 [create_bd_cell -type module -reference $block_name $block_cell_name] } errmsg] } {
      catch {common::send_gid_msg -ssname BD::TCL -id 2095 -severity "ERROR" "Unable to add referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
      return 1
-   } elseif { $top_artya7100t_0 eq "" } {
+   } elseif { $top_speech_commands_0 eq "" } {
      catch {common::send_gid_msg -ssname BD::TCL -id 2096 -severity "ERROR" "Unable to referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
      return 1
    }
   
   # Create interface connections
-  connect_bd_intf_net -intf_net axi_dma_0_M_AXIS_MM2S [get_bd_intf_pins axi_dma_0/M_AXIS_MM2S] [get_bd_intf_pins top_artya7100t_0/instruction]
+  connect_bd_intf_net -intf_net axi_dma_0_M_AXIS_MM2S [get_bd_intf_pins axi_dma_0/M_AXIS_MM2S] [get_bd_intf_pins top_speech_commands_0/instruction]
   connect_bd_intf_net -intf_net axi_dma_0_M_AXI_MM2S1 [get_bd_intf_pins M_AXI_MM2S] [get_bd_intf_pins axi_dma_0/M_AXI_MM2S]
   connect_bd_intf_net -intf_net smartconnect_0_M06_AXI [get_bd_intf_pins S_AXI_LITE] [get_bd_intf_pins axi_dma_0/S_AXI_LITE]
-  connect_bd_intf_net -intf_net top_artya7100t_0_m_axi_dram0 [get_bd_intf_pins m_axi_dram0] [get_bd_intf_pins top_artya7100t_0/m_axi_dram0]
-  connect_bd_intf_net -intf_net top_artya7100t_0_m_axi_dram1 [get_bd_intf_pins m_axi_dram1] [get_bd_intf_pins top_artya7100t_0/m_axi_dram1]
+  connect_bd_intf_net -intf_net top_speech_commands_0_m_axi_dram0 [get_bd_intf_pins m_axi_dram0] [get_bd_intf_pins top_speech_commands_0/m_axi_dram0]
+  connect_bd_intf_net -intf_net top_speech_commands_0_m_axi_dram1 [get_bd_intf_pins m_axi_dram1] [get_bd_intf_pins top_speech_commands_0/m_axi_dram1]
 
   # Create port connections
-  connect_bd_net -net microblaze_0_Clk [get_bd_pins s_axi_lite_aclk] [get_bd_pins axi_dma_0/m_axi_mm2s_aclk] [get_bd_pins axi_dma_0/s_axi_lite_aclk] [get_bd_pins top_artya7100t_0/clock]
-  connect_bd_net -net proc_sys_reset_0_peripheral_aresetn [get_bd_pins axi_resetn] [get_bd_pins axi_dma_0/axi_resetn] [get_bd_pins top_artya7100t_0/reset]
+  connect_bd_net -net microblaze_0_Clk [get_bd_pins s_axi_lite_aclk] [get_bd_pins axi_dma_0/m_axi_mm2s_aclk] [get_bd_pins axi_dma_0/s_axi_lite_aclk] [get_bd_pins top_speech_commands_0/clock]
+  connect_bd_net -net proc_sys_reset_0_peripheral_aresetn [get_bd_pins axi_resetn] [get_bd_pins axi_dma_0/axi_resetn] [get_bd_pins top_speech_commands_0/reset]
 
   # Restore current instance
   current_bd_instance $oldCurInst
@@ -1160,8 +1160,8 @@ proc create_root_design { parentCell } {
   assign_bd_address -offset 0x80000000 -range 0x10000000 -target_address_space [get_bd_addr_spaces rfft/axi_dma_0/Data_MM2S] [get_bd_addr_segs mig_7series_0/memmap/memaddr] -force
   assign_bd_address -offset 0x80000000 -range 0x10000000 -target_address_space [get_bd_addr_spaces rfft/axi_dma_0/Data_S2MM] [get_bd_addr_segs mig_7series_0/memmap/memaddr] -force
   assign_bd_address -offset 0x80000000 -range 0x10000000 -target_address_space [get_bd_addr_spaces tcu/axi_dma_0/Data_MM2S] [get_bd_addr_segs mig_7series_0/memmap/memaddr] -force
-  assign_bd_address -offset 0x80000000 -range 0x10000000 -target_address_space [get_bd_addr_spaces tcu/top_artya7100t_0/m_axi_dram0] [get_bd_addr_segs mig_7series_0/memmap/memaddr] -force
-  assign_bd_address -offset 0x80000000 -range 0x10000000 -target_address_space [get_bd_addr_spaces tcu/top_artya7100t_0/m_axi_dram1] [get_bd_addr_segs mig_7series_0/memmap/memaddr] -force
+  assign_bd_address -offset 0x80000000 -range 0x10000000 -target_address_space [get_bd_addr_spaces tcu/top_speech_commands_0/m_axi_dram0] [get_bd_addr_segs mig_7series_0/memmap/memaddr] -force
+  assign_bd_address -offset 0x80000000 -range 0x10000000 -target_address_space [get_bd_addr_spaces tcu/top_speech_commands_0/m_axi_dram1] [get_bd_addr_segs mig_7series_0/memmap/memaddr] -force
 
   # Exclude Address Segments
   exclude_bd_addr_seg -offset 0x41E00000 -range 0x00010000 -target_address_space [get_bd_addr_spaces acquisition/axi_dma_0/Data_S2MM] [get_bd_addr_segs acquisition/axi_dma_0/S_AXI_LITE/Reg]
@@ -1209,24 +1209,24 @@ proc create_root_design { parentCell } {
   exclude_bd_addr_seg -offset 0x44A00000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/axi_dma_0/Data_MM2S] [get_bd_addr_segs axi_quad_spi_0/AXI_LITE/Reg]
   exclude_bd_addr_seg -offset 0x41C00000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/axi_dma_0/Data_MM2S] [get_bd_addr_segs axi_timer_0/S_AXI/Reg]
   exclude_bd_addr_seg -offset 0x40600000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/axi_dma_0/Data_MM2S] [get_bd_addr_segs axi_uartlite_0/S_AXI/Reg]
-  exclude_bd_addr_seg -offset 0x41E00000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_artya7100t_0/m_axi_dram0] [get_bd_addr_segs acquisition/axi_dma_0/S_AXI_LITE/Reg]
-  exclude_bd_addr_seg -offset 0x41E10000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_artya7100t_0/m_axi_dram0] [get_bd_addr_segs rfft/axi_dma_0/S_AXI_LITE/Reg]
-  exclude_bd_addr_seg -offset 0x41E20000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_artya7100t_0/m_axi_dram0] [get_bd_addr_segs tcu/axi_dma_0/S_AXI_LITE/Reg]
-  exclude_bd_addr_seg -offset 0x40000000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_artya7100t_0/m_axi_dram0] [get_bd_addr_segs acquisition/axi_gpio_0/S_AXI/Reg]
-  exclude_bd_addr_seg -offset 0x41200000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_artya7100t_0/m_axi_dram0] [get_bd_addr_segs axi_intc_0/S_AXI/Reg]
-  exclude_bd_addr_seg -offset 0x44A10000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_artya7100t_0/m_axi_dram0] [get_bd_addr_segs axi_quad_spi_0/aximm/MEM0]
-  exclude_bd_addr_seg -offset 0x44A00000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_artya7100t_0/m_axi_dram0] [get_bd_addr_segs axi_quad_spi_0/AXI_LITE/Reg]
-  exclude_bd_addr_seg -offset 0x41C00000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_artya7100t_0/m_axi_dram0] [get_bd_addr_segs axi_timer_0/S_AXI/Reg]
-  exclude_bd_addr_seg -offset 0x40600000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_artya7100t_0/m_axi_dram0] [get_bd_addr_segs axi_uartlite_0/S_AXI/Reg]
-  exclude_bd_addr_seg -offset 0x41E00000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_artya7100t_0/m_axi_dram1] [get_bd_addr_segs acquisition/axi_dma_0/S_AXI_LITE/Reg]
-  exclude_bd_addr_seg -offset 0x41E10000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_artya7100t_0/m_axi_dram1] [get_bd_addr_segs rfft/axi_dma_0/S_AXI_LITE/Reg]
-  exclude_bd_addr_seg -offset 0x41E20000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_artya7100t_0/m_axi_dram1] [get_bd_addr_segs tcu/axi_dma_0/S_AXI_LITE/Reg]
-  exclude_bd_addr_seg -offset 0x40000000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_artya7100t_0/m_axi_dram1] [get_bd_addr_segs acquisition/axi_gpio_0/S_AXI/Reg]
-  exclude_bd_addr_seg -offset 0x41200000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_artya7100t_0/m_axi_dram1] [get_bd_addr_segs axi_intc_0/S_AXI/Reg]
-  exclude_bd_addr_seg -offset 0x44A10000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_artya7100t_0/m_axi_dram1] [get_bd_addr_segs axi_quad_spi_0/aximm/MEM0]
-  exclude_bd_addr_seg -offset 0x44A00000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_artya7100t_0/m_axi_dram1] [get_bd_addr_segs axi_quad_spi_0/AXI_LITE/Reg]
-  exclude_bd_addr_seg -offset 0x41C00000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_artya7100t_0/m_axi_dram1] [get_bd_addr_segs axi_timer_0/S_AXI/Reg]
-  exclude_bd_addr_seg -offset 0x40600000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_artya7100t_0/m_axi_dram1] [get_bd_addr_segs axi_uartlite_0/S_AXI/Reg]
+  exclude_bd_addr_seg -offset 0x41E00000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_speech_commands_0/m_axi_dram0] [get_bd_addr_segs acquisition/axi_dma_0/S_AXI_LITE/Reg]
+  exclude_bd_addr_seg -offset 0x41E10000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_speech_commands_0/m_axi_dram0] [get_bd_addr_segs rfft/axi_dma_0/S_AXI_LITE/Reg]
+  exclude_bd_addr_seg -offset 0x41E20000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_speech_commands_0/m_axi_dram0] [get_bd_addr_segs tcu/axi_dma_0/S_AXI_LITE/Reg]
+  exclude_bd_addr_seg -offset 0x40000000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_speech_commands_0/m_axi_dram0] [get_bd_addr_segs acquisition/axi_gpio_0/S_AXI/Reg]
+  exclude_bd_addr_seg -offset 0x41200000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_speech_commands_0/m_axi_dram0] [get_bd_addr_segs axi_intc_0/S_AXI/Reg]
+  exclude_bd_addr_seg -offset 0x44A10000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_speech_commands_0/m_axi_dram0] [get_bd_addr_segs axi_quad_spi_0/aximm/MEM0]
+  exclude_bd_addr_seg -offset 0x44A00000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_speech_commands_0/m_axi_dram0] [get_bd_addr_segs axi_quad_spi_0/AXI_LITE/Reg]
+  exclude_bd_addr_seg -offset 0x41C00000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_speech_commands_0/m_axi_dram0] [get_bd_addr_segs axi_timer_0/S_AXI/Reg]
+  exclude_bd_addr_seg -offset 0x40600000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_speech_commands_0/m_axi_dram0] [get_bd_addr_segs axi_uartlite_0/S_AXI/Reg]
+  exclude_bd_addr_seg -offset 0x41E00000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_speech_commands_0/m_axi_dram1] [get_bd_addr_segs acquisition/axi_dma_0/S_AXI_LITE/Reg]
+  exclude_bd_addr_seg -offset 0x41E10000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_speech_commands_0/m_axi_dram1] [get_bd_addr_segs rfft/axi_dma_0/S_AXI_LITE/Reg]
+  exclude_bd_addr_seg -offset 0x41E20000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_speech_commands_0/m_axi_dram1] [get_bd_addr_segs tcu/axi_dma_0/S_AXI_LITE/Reg]
+  exclude_bd_addr_seg -offset 0x40000000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_speech_commands_0/m_axi_dram1] [get_bd_addr_segs acquisition/axi_gpio_0/S_AXI/Reg]
+  exclude_bd_addr_seg -offset 0x41200000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_speech_commands_0/m_axi_dram1] [get_bd_addr_segs axi_intc_0/S_AXI/Reg]
+  exclude_bd_addr_seg -offset 0x44A10000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_speech_commands_0/m_axi_dram1] [get_bd_addr_segs axi_quad_spi_0/aximm/MEM0]
+  exclude_bd_addr_seg -offset 0x44A00000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_speech_commands_0/m_axi_dram1] [get_bd_addr_segs axi_quad_spi_0/AXI_LITE/Reg]
+  exclude_bd_addr_seg -offset 0x41C00000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_speech_commands_0/m_axi_dram1] [get_bd_addr_segs axi_timer_0/S_AXI/Reg]
+  exclude_bd_addr_seg -offset 0x40600000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_speech_commands_0/m_axi_dram1] [get_bd_addr_segs axi_uartlite_0/S_AXI/Reg]
 
 
   # Restore current instance
