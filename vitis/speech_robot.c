@@ -1,52 +1,8 @@
-/******************************************************************************
- *
- * Copyright (C) 2009 - 2014 Xilinx, Inc.  All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * Use of the Software is limited solely to applications:
- * (a) running on a Xilinx device, or
- * (b) that interact with a Xilinx device through a bus or interconnect.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL
- * XILINX  BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER LIABILITY,
- * WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT OF
- * OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
- * SOFTWARE.
- *
- * Except as contained in this notice, the name of the Xilinx shall not be used
- * in advertising or otherwise to promote the sale, use or other dealings in
- * this Software without prior written authorization from Xilinx.
- *
- ******************************************************************************/
+/* SPDX-License-Identifier: Apache-2.0 */
+/* Copyright © 2019-2022 Tensil AI Company */
 
-/*
- * helloworld.c: simple test application
- *
- * This application configures UART 16550 to baud rate 9600.
- * PS7 UART (Zynq) is not initialized by this application, since
- * bootrom/bsp configures it to baud rate 115200
- *
- * ------------------------------------------------
- * | UART TYPE   BAUD RATE                        |
- * ------------------------------------------------
- *   uartns550   9600
- *   uartlite    Configurable only in HW design
- *   ps7_uart    115200 (configured by bootrom/bsp)
- */
-
-#include <stdio.h>
 #include <stdlib.h>
+#include <stdint.h>
 #include "platform.h"
 #include "xil_printf.h"
 #include "xgpio_l.h"
@@ -64,50 +20,66 @@ XAxiDma AcqAxiDma;
 XAxiDma RfftAxiDma;
 XTmrCtr Timer;
 
-void print_float(float f) {
+/*void print_float(float f) {
 	if (f < 0.0)
 		print("-");
 
 	int integer = abs((int) f);
 	int fraction = abs((int) ((f - (float) integer) * 1e6));
 	xil_printf("%d.%06d", integer, fraction);
-}
+}*/
 
-#define ACQ_PACKET_SAMPLES 256
-#define ACQ_PACKET_SIZE (ACQ_PACKET_SAMPLES * sizeof(float))
+#define ACQ_DT float
+
+#define ACQ_PACKET_LENGTH 256
+#define ACQ_PACKET_SIZE (ACQ_PACKET_LENGTH * sizeof(ACQ_DT))
 #define ACQ_PACKET_HALF_SIZE (ACQ_PACKET_SIZE / 2)
 
-#define RFFT_PACKET_VALUES ACQ_PACKET_SAMPLES
-#define RFFT_PACKET_SIZE (RFFT_PACKET_VALUES * sizeof(short))
+#define RFFT_PACKET_LENGTH ACQ_PACKET_LENGTH
+#define RFFT_PACKET_SIZE (RFFT_PACKET_LENGTH * sizeof(MODEL_DT))
 #define RFFT_FRAME_PACKETS 124
 #define RFFT_FRAME_HALF_PACKETS (RFFT_FRAME_PACKETS / 2)
 #define RFFT_FRAME_SIZE (RFFT_FRAME_PACKETS * RFFT_PACKET_SIZE)
 
-#define SPEECH_MODEL_INPUT_WIDTH 129
-#define SPEECH_MODEL_VECTOR_VALUES TENSIL_ARCHITECTURE_ARRAY_SIZE
-#define SPEECH_MODEL_INPUT_VECTOR_SIZE (SPEECH_MODEL_VECTOR_VALUES * sizeof(short))
-#define SPEECH_MODEL_INPUT_LINE_SIZE (SPEECH_MODEL_INPUT_WIDTH * SPEECH_MODEL_INPUT_VECTOR_SIZE)
-#define SPEECH_MODEL_INPUT_HEIGHT RFFT_FRAME_PACKETS
-#define SPEECH_MODEL_INPUT_SIZE (SPEECH_MODEL_INPUT_HEIGHT * SPEECH_MODEL_INPUT_LINE_SIZE)
+#define MODEL_DT int16_t
+#define MODEL_DT_MIN INT16_MIN
+
+#define MODEL_VECTOR_LENGTH TENSIL_ARCHITECTURE_ARRAY_SIZE
+#define MODEL_VECTOR_SIZE (MODEL_VECTOR_LENGTH * sizeof(MODEL_DT))
+
+#define MODEL_INPUT_WIDTH 129
+#define MODEL_INPUT_LINE_SIZE (MODEL_INPUT_WIDTH * MODEL_VECTOR_SIZE)
+#define MODEL_INPUT_HEIGHT RFFT_FRAME_PACKETS
+#define MODEL_INPUT_SIZE (MODEL_INPUT_HEIGHT * MODEL_INPUT_LINE_SIZE)
+
+#define MODEL_CONST_BASE (XPAR_AXI_QUAD_SPI_0_AXI4_BASEADDR + 0x500000)
+#define MODEL_CONST_SIZE_VECTORS 93808
+
+#define MODEL_PROG_BASE (XPAR_AXI_QUAD_SPI_0_AXI4_BASEADDR + 0x400000)
+#define MODEL_PROG_SIZE 642064
 
 #define ALIGNMENT 0x10000
 #define ALIGN(s) (s / ALIGNMENT + 1) * ALIGNMENT
 
 #define START ((u8 *) XPAR_MIG7SERIES_0_BASEADDR)
 
-static size_t argmax(size_t size, const short *buffer, short *max, short *max2) {
+static size_t argmax(size_t size, const MODEL_DT *buffer, MODEL_DT *max, MODEL_DT *max2) {
 	if (!size)
 		return -1;
 
-	*max = buffer[0];
-	*max2 = *max;
+	*max = MODEL_DT_MIN;
+	*max2 = MODEL_DT_MIN;
 	size_t max_i = 0;
 
-	for (size_t i = 1; i < size; i++)
+	for (size_t i = 0; i < size; i++)
 		if (buffer[i] > *max) {
-			*max2 = *max;
 			*max = buffer[i];
 			max_i = i;
+		}
+
+	for (size_t i = 0; i < size; i++)
+		if (i != max_i && buffer[i] > *max2) {
+			*max2 = buffer[i];
 		}
 
 	return max_i;
@@ -135,15 +107,15 @@ int main() {
 	u8 *Dram0BBufferPtr =
 			Dram0ABufferPtr
 					+ ALIGN(
-							TENSIL_ARCHITECTURE_DRAM0_DEPTH * TENSIL_ARCHITECTURE_ARRAY_SIZE * sizeof(short));
+							TENSIL_ARCHITECTURE_DRAM0_DEPTH * TENSIL_ARCHITECTURE_ARRAY_SIZE * sizeof(MODEL_DT));
 	u8 *Dram1BufferPtr =
 			Dram0BBufferPtr
 					+ ALIGN(
-							TENSIL_ARCHITECTURE_DRAM0_DEPTH * TENSIL_ARCHITECTURE_ARRAY_SIZE * sizeof(short));
+							TENSIL_ARCHITECTURE_DRAM0_DEPTH * TENSIL_ARCHITECTURE_ARRAY_SIZE * sizeof(MODEL_DT));
 	u8 *ProgBufferPtr =
 			Dram1BufferPtr
 					+ ALIGN(
-							TENSIL_ARCHITECTURE_DRAM1_DEPTH * TENSIL_ARCHITECTURE_ARRAY_SIZE * sizeof(short));
+							TENSIL_ARCHITECTURE_DRAM1_DEPTH * TENSIL_ARCHITECTURE_ARRAY_SIZE * sizeof(MODEL_DT));
 	u8 *Dram0PrepareBufferPtr = Dram0ABufferPtr;
 	u8 *Dram0InferBufferPtr = Dram0BBufferPtr;
 
@@ -211,8 +183,7 @@ int main() {
 	memset((void *) RfftTxBufferPtr, 0, ACQ_PACKET_SIZE);
 	memset((void *) RfftRxBufferPtr, 0, RFFT_FRAME_SIZE);
 
-	const char *commands[] = { "stop", "down", "yes", "go", "left", "right",
-			"up", "no" };
+	const char *commands[] = { "stop", "go", "left", "right" };
 
 	struct architecture arch = { .array_size = TENSIL_ARCHITECTURE_ARRAY_SIZE,
 			.data_type = TENSIL_ARCHITECTURE_DATA_TYPE, .local_depth =
@@ -262,14 +233,14 @@ int main() {
 		goto error;
 
 	memcpy((void *) Dram1BufferPtr,
-			(const void*) (XPAR_AXI_QUAD_SPI_0_AXI4_BASEADDR + 0x500000),
-			93808 * TENSIL_ARCHITECTURE_ARRAY_SIZE * sizeof(short));
+			(const void*) MODEL_CONST_BASE,
+			MODEL_CONST_SIZE_VECTORS * TENSIL_ARCHITECTURE_ARRAY_SIZE * sizeof(MODEL_DT));
 
-	//Xil_DCacheFlushRange((UINTPTR)Dram0BufferPtr, TENSIL_ARCHITECTURE_DRAM0_DEPTH * TENSIL_ARCHITECTURE_ARRAY_SIZE * sizeof(short));
-	//Xil_DCacheFlushRange((UINTPTR)Dram1BufferPtr, TENSIL_ARCHITECTURE_DRAM1_DEPTH * TENSIL_ARCHITECTURE_ARRAY_SIZE * sizeof(short));
+	//Xil_DCacheFlushRange((UINTPTR)Dram0BufferPtr, TENSIL_ARCHITECTURE_DRAM0_DEPTH * TENSIL_ARCHITECTURE_ARRAY_SIZE * sizeof(MODEL_DT));
+	//Xil_DCacheFlushRange((UINTPTR)Dram1BufferPtr, TENSIL_ARCHITECTURE_DRAM1_DEPTH * TENSIL_ARCHITECTURE_ARRAY_SIZE * sizeof(MODEL_DT));
 
 	error = buffer_append_program(&buffer,
-			(const u8*) (XPAR_AXI_QUAD_SPI_0_AXI4_BASEADDR + 0x400000), 642064);
+			(const u8*) MODEL_PROG_BASE, MODEL_PROG_SIZE);
 
 	if (error)
 		goto error;
@@ -395,54 +366,54 @@ int main() {
 		if (stft_packet < RFFT_FRAME_HALF_PACKETS) {
 			u8 *Dram0BasePtr = Dram0PrepareBufferPtr
 					+ (stft_packet + RFFT_FRAME_HALF_PACKETS)
-							* SPEECH_MODEL_INPUT_LINE_SIZE;
+							* MODEL_INPUT_LINE_SIZE;
 			u8 *RfftRxBasePtr = RfftRxBufferPtr + stft_packet * RFFT_PACKET_SIZE;
 
-			memset((void*) Dram0BasePtr, 0, SPEECH_MODEL_INPUT_LINE_SIZE);
+			memset((void*) Dram0BasePtr, 0, MODEL_INPUT_LINE_SIZE);
 
-			for (size_t i = 0; i < SPEECH_MODEL_INPUT_WIDTH; i++) {
-				((short *) Dram0BasePtr)[i * SPEECH_MODEL_VECTOR_VALUES] =
-						((short *) RfftRxBasePtr)[RFFT_PACKET_VALUES - (i + 1)];
+			for (size_t i = 0; i < MODEL_INPUT_WIDTH; i++) {
+				((MODEL_DT *) Dram0BasePtr)[i * MODEL_VECTOR_LENGTH] =
+						((MODEL_DT *) RfftRxBasePtr)[RFFT_PACKET_LENGTH - (i + 1)];
 			}
 
 			Dram0BasePtr = Dram0PrepareBufferPtr
-					+ stft_packet * SPEECH_MODEL_INPUT_LINE_SIZE;
+					+ stft_packet * MODEL_INPUT_LINE_SIZE;
 			RfftRxBasePtr =
 					RfftRxBufferPtr
 							+ (stft_packet + RFFT_FRAME_HALF_PACKETS)
 									* RFFT_PACKET_SIZE;
 
-			memset((void*) Dram0BasePtr, 0, SPEECH_MODEL_INPUT_LINE_SIZE);
+			memset((void*) Dram0BasePtr, 0, MODEL_INPUT_LINE_SIZE);
 
-			for (size_t i = 0; i < SPEECH_MODEL_INPUT_WIDTH; i++) {
-				((short *) Dram0BasePtr)[i * SPEECH_MODEL_VECTOR_VALUES] =
-						((short *) RfftRxBasePtr)[RFFT_PACKET_VALUES - (i + 1)];
+			for (size_t i = 0; i < MODEL_INPUT_WIDTH; i++) {
+				((MODEL_DT *) Dram0BasePtr)[i * MODEL_VECTOR_LENGTH] =
+						((MODEL_DT *) RfftRxBasePtr)[RFFT_PACKET_LENGTH - (i + 1)];
 			}
 		} else {
 			u8 *Dram0BasePtr = Dram0PrepareBufferPtr
-					+ stft_packet * SPEECH_MODEL_INPUT_LINE_SIZE;
+					+ stft_packet * MODEL_INPUT_LINE_SIZE;
 			u8 *RfftRxBasePtr = RfftRxBufferPtr + stft_packet * RFFT_PACKET_SIZE;
 
-			memset((void*) Dram0BasePtr, 0, SPEECH_MODEL_INPUT_LINE_SIZE);
+			memset((void*) Dram0BasePtr, 0, MODEL_INPUT_LINE_SIZE);
 
-			for (size_t i = 0; i < SPEECH_MODEL_INPUT_WIDTH; i++) {
-				((short *) Dram0BasePtr)[i * SPEECH_MODEL_VECTOR_VALUES] =
-						((short *) RfftRxBasePtr)[RFFT_PACKET_VALUES - (i + 1)];
+			for (size_t i = 0; i < MODEL_INPUT_WIDTH; i++) {
+				((MODEL_DT *) Dram0BasePtr)[i * MODEL_VECTOR_LENGTH] =
+						((MODEL_DT *) RfftRxBasePtr)[RFFT_PACKET_LENGTH - (i + 1)];
 			}
 
 			Dram0BasePtr = Dram0PrepareBufferPtr
 					+ (stft_packet - RFFT_FRAME_HALF_PACKETS)
-							* SPEECH_MODEL_INPUT_LINE_SIZE;
+							* MODEL_INPUT_LINE_SIZE;
 			RfftRxBasePtr =
 					RfftRxBufferPtr
 							+ (stft_packet - RFFT_FRAME_HALF_PACKETS)
 									* RFFT_PACKET_SIZE;
 
-			memset((void*) Dram0BasePtr, 0, SPEECH_MODEL_INPUT_LINE_SIZE);
+			memset((void*) Dram0BasePtr, 0, MODEL_INPUT_LINE_SIZE);
 
-			for (size_t i = 0; i < SPEECH_MODEL_INPUT_WIDTH; i++) {
-				((short *) Dram0BasePtr)[i * SPEECH_MODEL_VECTOR_VALUES] =
-						((short *) RfftRxBasePtr)[RFFT_PACKET_VALUES - (i + 1)];
+			for (size_t i = 0; i < MODEL_INPUT_WIDTH; i++) {
+				((MODEL_DT *) Dram0BasePtr)[i * MODEL_VECTOR_LENGTH] =
+						((MODEL_DT *) RfftRxBasePtr)[RFFT_PACKET_LENGTH - (i + 1)];
 			}
 		}
 
@@ -491,19 +462,12 @@ int main() {
 							(TENSIL_ARCHITECTURE_DRAM0_DEPTH - 2)
 									* arch.array_size, arch.array_size) == 0) {
 
-						short max = 0;
-						short max2 = 0;
-						size_t i = argmax(8, (short*) Dram0InferBufferPtr, &max, &max2);
+						MODEL_DT max = 0;
+						MODEL_DT max2 = 0;
+						size_t i = argmax(4, (MODEL_DT*) Dram0InferBufferPtr, &max, &max2);
 
-						float maxf = (float)max / 256.0;
-						float max2f = (float)max2 / 256.0;
-
-						if (maxf - max2f > 40.0/* && max2 < 50.0*/) {
-							xil_printf("%s = ", commands[i]);
-							print_float(maxf);
-							xil_printf(" (");
-							print_float(max2f);
-							xil_printf(")\r\n");
+						if ((max - max2) > 64 * 256) {
+							xil_printf("%s = %d (%d)\r\n", commands[i], max, max2);
 						}
 
 						instructions_run_offset = 0;
@@ -523,12 +487,12 @@ int main() {
 
 	}
 
-	/*for (size_t i = 0; i < SPEECH_MODEL_INPUT_HEIGHT; i++)
-	 for (size_t j = 0; j < SPEECH_MODEL_INPUT_WIDTH; j++)
-	 for (size_t k = 0; k < SPEECH_MODEL_VECTOR_VALUES; k++) {
-	 print_float((float)((short*) Dram0BufferPtr)[(i * SPEECH_MODEL_INPUT_WIDTH + j) * SPEECH_MODEL_VECTOR_VALUES + k] / 256.0);
+	/*for (size_t i = 0; i < MODEL_INPUT_HEIGHT; i++)
+	 for (size_t j = 0; j < MODEL_INPUT_WIDTH; j++)
+	 for (size_t k = 0; k < MODEL_VECTOR_LENGTH; k++) {
+	 print_float((float)((MODEL_DT*) Dram0BufferPtr)[(i * MODEL_INPUT_WIDTH + j) * MODEL_VECTOR_LENGTH + k] / 256.0);
 
-	 if (k == SPEECH_MODEL_VECTOR_VALUES - 1)
+	 if (k == MODEL_VECTOR_LENGTH - 1)
 	 xil_printf("\r\n");
 	 else
 	 xil_printf(",");
