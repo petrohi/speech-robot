@@ -31,15 +31,17 @@ XTmrCtr Timer;
 
 #define ACQ_DT float
 
-#define ACQ_PACKET_LENGTH 256
+#define ACQ_PACKET_LENGTH 128
 #define ACQ_PACKET_SIZE (ACQ_PACKET_LENGTH * sizeof(ACQ_DT))
-#define ACQ_PACKET_HALF_SIZE (ACQ_PACKET_SIZE / 2)
+#define ACQ_PACKET_DOUBLE_SIZE (2 * ACQ_PACKET_SIZE)
 
-#define RFFT_PACKET_LENGTH ACQ_PACKET_LENGTH
-#define RFFT_PACKET_SIZE (RFFT_PACKET_LENGTH * sizeof(MODEL_DT))
-#define RFFT_FRAME_PACKETS 124
-#define RFFT_FRAME_HALF_PACKETS (RFFT_FRAME_PACKETS / 2)
-#define RFFT_FRAME_SIZE (RFFT_FRAME_PACKETS * RFFT_PACKET_SIZE)
+#define RFFT_TX_PACKET_SIZE ACQ_PACKET_DOUBLE_SIZE
+
+#define RFFT_TX_FRAME_WIDTH (2 * ACQ_PACKET_LENGTH)
+#define RFFT_TX_FRAME_LINE_SIZE (RFFT_TX_FRAME_WIDTH * sizeof(MODEL_DT))
+#define RFFT_TX_FRAME_HEIGHT 124
+#define RFFT_FRAME_HALF_PACKETS (RFFT_TX_FRAME_HEIGHT / 2)
+#define RFFT_TX_FRAME_SIZE (RFFT_TX_FRAME_HEIGHT * RFFT_TX_FRAME_LINE_SIZE)
 
 #define MODEL_DT int16_t
 #define MODEL_DT_MIN INT16_MIN
@@ -47,9 +49,12 @@ XTmrCtr Timer;
 #define MODEL_VECTOR_LENGTH TENSIL_ARCHITECTURE_ARRAY_SIZE
 #define MODEL_VECTOR_SIZE (MODEL_VECTOR_LENGTH * sizeof(MODEL_DT))
 
+#define MODEL_DRAM0_BUFFER_NUMBER 4
+
 #define MODEL_INPUT_WIDTH 129
 #define MODEL_INPUT_LINE_SIZE (MODEL_INPUT_WIDTH * MODEL_VECTOR_SIZE)
-#define MODEL_INPUT_HEIGHT RFFT_FRAME_PACKETS
+#define MODEL_INPUT_HEIGHT RFFT_TX_FRAME_HEIGHT
+#define MODEL_INPUT_STEP (MODEL_INPUT_HEIGHT / MODEL_DRAM0_BUFFER_NUMBER)
 #define MODEL_INPUT_SIZE (MODEL_INPUT_HEIGHT * MODEL_INPUT_LINE_SIZE)
 
 #define MODEL_CONST_BASE (XPAR_AXI_QUAD_SPI_0_AXI4_BASEADDR + 0x500000)
@@ -101,23 +106,28 @@ int main() {
 
 	u8 *AcqBufferPtr = TxBdSpace
 			+ ALIGN(XAxiDma_BdRingMemCalc(XAXIDMA_BD_MINIMUM_ALIGNMENT, 2));
-	u8 *RfftTxBufferPtr = AcqBufferPtr + ALIGN(ACQ_PACKET_SIZE);
-	u8 *RfftRxBufferPtr = RfftTxBufferPtr + ALIGN(ACQ_PACKET_SIZE);
-	u8 *Dram0ABufferPtr = RfftRxBufferPtr + ALIGN(RFFT_FRAME_SIZE);
-	u8 *Dram0BBufferPtr =
-			Dram0ABufferPtr
-					+ ALIGN(
-							TENSIL_ARCHITECTURE_DRAM0_DEPTH * TENSIL_ARCHITECTURE_ARRAY_SIZE * sizeof(MODEL_DT));
+	u8 *RfftTxBufferPtr = AcqBufferPtr + ALIGN(ACQ_PACKET_DOUBLE_SIZE);
+	u8 *RfftRxBufferPtr = RfftTxBufferPtr + ALIGN(RFFT_TX_PACKET_SIZE);
+
+	u8 *Dram0BufferPtrs[MODEL_DRAM0_BUFFER_NUMBER];
+
+	Dram0BufferPtrs[0] = RfftRxBufferPtr + ALIGN(RFFT_TX_FRAME_SIZE);
+
+	for (size_t i = 1; i < MODEL_DRAM0_BUFFER_NUMBER; i++) {
+		Dram0BufferPtrs[i] =
+				Dram0BufferPtrs[i - 1]
+						+ ALIGN(
+								TENSIL_ARCHITECTURE_DRAM0_DEPTH * TENSIL_ARCHITECTURE_ARRAY_SIZE * sizeof(MODEL_DT));
+	}
+
 	u8 *Dram1BufferPtr =
-			Dram0BBufferPtr
+			Dram0BufferPtrs[MODEL_DRAM0_BUFFER_NUMBER - 1]
 					+ ALIGN(
 							TENSIL_ARCHITECTURE_DRAM0_DEPTH * TENSIL_ARCHITECTURE_ARRAY_SIZE * sizeof(MODEL_DT));
 	u8 *ProgBufferPtr =
 			Dram1BufferPtr
 					+ ALIGN(
 							TENSIL_ARCHITECTURE_DRAM1_DEPTH * TENSIL_ARCHITECTURE_ARRAY_SIZE * sizeof(MODEL_DT));
-	u8 *Dram0PrepareBufferPtr = Dram0ABufferPtr;
-	u8 *Dram0InferBufferPtr = Dram0BBufferPtr;
 
 	XAxiDma_Config *AcqCfgPtr = XAxiDma_LookupConfig(
 			XPAR_ACQUISITION_AXI_DMA_0_DEVICE_ID);
@@ -179,9 +189,9 @@ int main() {
 	if (Status)
 		goto error;
 
-	memset((void *) AcqBufferPtr, 0, ACQ_PACKET_SIZE);
-	memset((void *) RfftTxBufferPtr, 0, ACQ_PACKET_SIZE);
-	memset((void *) RfftRxBufferPtr, 0, RFFT_FRAME_SIZE);
+	memset((void *) AcqBufferPtr, 0, ACQ_PACKET_DOUBLE_SIZE);
+	memset((void *) RfftTxBufferPtr, 0, RFFT_TX_PACKET_SIZE);
+	memset((void *) RfftRxBufferPtr, 0, RFFT_TX_FRAME_SIZE);
 
 	const char *commands[] = { "stop", "go", "left", "right" };
 
@@ -263,27 +273,29 @@ int main() {
 	if (error)
 		goto error;
 
+	print("Init done\r\n");
+
 	int acq_reversed = 0;
-	int stft_packet = 0;
+	int rfft_line = 0;
 
 	size_t instructions_run_offset = 0;
 
 	while (1) {
-		size_t acq_offset = (1 - acq_reversed) * ACQ_PACKET_HALF_SIZE;
+		size_t acq_offset = (1 - acq_reversed) * ACQ_PACKET_SIZE;
 
 		Status = XAxiDma_SimpleTransfer(&AcqAxiDma,
 				(UINTPTR) (AcqBufferPtr + acq_offset),
-				ACQ_PACKET_HALF_SIZE, XAXIDMA_DEVICE_TO_DMA);
+				ACQ_PACKET_SIZE, XAXIDMA_DEVICE_TO_DMA);
 
 		if (Status)
 			goto error;
 
 		acq_reversed = (acq_reversed + 1) % 2;
-		acq_offset = (1 - acq_reversed) * ACQ_PACKET_HALF_SIZE;
+		acq_offset = (1 - acq_reversed) * ACQ_PACKET_SIZE;
 
 		memcpy((void*) (RfftTxBufferPtr + acq_offset),
 				(const void*) (AcqBufferPtr + acq_offset),
-				ACQ_PACKET_HALF_SIZE);
+				ACQ_PACKET_SIZE);
 
 		XAxiDma_Bd *TxBdHeadPtr;
 		Status = XAxiDma_BdRingAlloc(TxRingPtr, 2, &TxBdHeadPtr);
@@ -293,7 +305,7 @@ int main() {
 
 		XAxiDma_Bd *TxBdPtr = TxBdHeadPtr;
 		for (size_t i = 0; i < 2; i++) {
-			size_t tx_offset = abs(i - acq_reversed) * ACQ_PACKET_HALF_SIZE;
+			size_t tx_offset = abs(i - acq_reversed) * ACQ_PACKET_SIZE;
 
 			Status = XAxiDma_BdSetBufAddr(TxBdPtr,
 					(UINTPTR) (RfftTxBufferPtr + tx_offset));
@@ -301,7 +313,7 @@ int main() {
 			if (Status)
 				goto error;
 
-			Status = XAxiDma_BdSetLength(TxBdPtr, ACQ_PACKET_HALF_SIZE,
+			Status = XAxiDma_BdSetLength(TxBdPtr, ACQ_PACKET_SIZE,
 					TxRingPtr->MaxTransferLen);
 
 			if (Status)
@@ -328,12 +340,12 @@ int main() {
 		XAxiDma_Bd *RxBdPtr = RxBdHeadPtr;
 
 		Status = XAxiDma_BdSetBufAddr(RxBdPtr,
-				(UINTPTR) (RfftRxBufferPtr + stft_packet * RFFT_PACKET_SIZE));
+				(UINTPTR) (RfftRxBufferPtr + rfft_line * RFFT_TX_FRAME_LINE_SIZE));
 
 		if (Status)
 			goto error;
 
-		Status = XAxiDma_BdSetLength(RxBdPtr, RFFT_PACKET_SIZE,
+		Status = XAxiDma_BdSetLength(RxBdPtr, RFFT_TX_FRAME_LINE_SIZE,
 				RxRingPtr->MaxTransferLen);
 
 		if (Status)
@@ -363,70 +375,41 @@ int main() {
 		if (Status)
 			goto error;
 
-		if (stft_packet < RFFT_FRAME_HALF_PACKETS) {
-			u8 *Dram0BasePtr = Dram0PrepareBufferPtr
-					+ (stft_packet + RFFT_FRAME_HALF_PACKETS)
-							* MODEL_INPUT_LINE_SIZE;
-			u8 *RfftRxBasePtr = RfftRxBufferPtr + stft_packet * RFFT_PACKET_SIZE;
+		size_t prepare_index = rfft_line / MODEL_INPUT_STEP;
+		size_t infer_index = prepare_index ? prepare_index - 1 : MODEL_DRAM0_BUFFER_NUMBER - 1;
+
+		u8 *Dram0PrepareBufferPtr = Dram0BufferPtrs[prepare_index];
+		u8 *Dram0InferBufferPtr = Dram0BufferPtrs[infer_index];
+
+		for (size_t i = 0; i < MODEL_DRAM0_BUFFER_NUMBER; i++) {
+			int shifted_line = rfft_line - i * MODEL_INPUT_STEP;
+
+			size_t rfft_source_line = shifted_line < 0 ? RFFT_TX_FRAME_HEIGHT + shifted_line : shifted_line;
+			size_t model_dest_line = (rfft_line % MODEL_INPUT_STEP) + (MODEL_DRAM0_BUFFER_NUMBER - 1 - i) * MODEL_INPUT_STEP;
+
+			u8 *RfftRxBasePtr = RfftRxBufferPtr + rfft_source_line * RFFT_TX_FRAME_LINE_SIZE;
+			u8 *Dram0BasePtr = Dram0PrepareBufferPtr + model_dest_line * MODEL_INPUT_LINE_SIZE;
 
 			memset((void*) Dram0BasePtr, 0, MODEL_INPUT_LINE_SIZE);
 
-			for (size_t i = 0; i < MODEL_INPUT_WIDTH; i++) {
-				((MODEL_DT *) Dram0BasePtr)[i * MODEL_VECTOR_LENGTH] =
-						((MODEL_DT *) RfftRxBasePtr)[RFFT_PACKET_LENGTH - (i + 1)];
-			}
-
-			Dram0BasePtr = Dram0PrepareBufferPtr
-					+ stft_packet * MODEL_INPUT_LINE_SIZE;
-			RfftRxBasePtr =
-					RfftRxBufferPtr
-							+ (stft_packet + RFFT_FRAME_HALF_PACKETS)
-									* RFFT_PACKET_SIZE;
-
-			memset((void*) Dram0BasePtr, 0, MODEL_INPUT_LINE_SIZE);
-
-			for (size_t i = 0; i < MODEL_INPUT_WIDTH; i++) {
-				((MODEL_DT *) Dram0BasePtr)[i * MODEL_VECTOR_LENGTH] =
-						((MODEL_DT *) RfftRxBasePtr)[RFFT_PACKET_LENGTH - (i + 1)];
-			}
-		} else {
-			u8 *Dram0BasePtr = Dram0PrepareBufferPtr
-					+ stft_packet * MODEL_INPUT_LINE_SIZE;
-			u8 *RfftRxBasePtr = RfftRxBufferPtr + stft_packet * RFFT_PACKET_SIZE;
-
-			memset((void*) Dram0BasePtr, 0, MODEL_INPUT_LINE_SIZE);
-
-			for (size_t i = 0; i < MODEL_INPUT_WIDTH; i++) {
-				((MODEL_DT *) Dram0BasePtr)[i * MODEL_VECTOR_LENGTH] =
-						((MODEL_DT *) RfftRxBasePtr)[RFFT_PACKET_LENGTH - (i + 1)];
-			}
-
-			Dram0BasePtr = Dram0PrepareBufferPtr
-					+ (stft_packet - RFFT_FRAME_HALF_PACKETS)
-							* MODEL_INPUT_LINE_SIZE;
-			RfftRxBasePtr =
-					RfftRxBufferPtr
-							+ (stft_packet - RFFT_FRAME_HALF_PACKETS)
-									* RFFT_PACKET_SIZE;
-
-			memset((void*) Dram0BasePtr, 0, MODEL_INPUT_LINE_SIZE);
-
-			for (size_t i = 0; i < MODEL_INPUT_WIDTH; i++) {
-				((MODEL_DT *) Dram0BasePtr)[i * MODEL_VECTOR_LENGTH] =
-						((MODEL_DT *) RfftRxBasePtr)[RFFT_PACKET_LENGTH - (i + 1)];
+			for (size_t j = 0; j < MODEL_INPUT_WIDTH; j++) {
+				((MODEL_DT *) Dram0BasePtr)[j * MODEL_VECTOR_LENGTH] =
+						((MODEL_DT *) RfftRxBasePtr)[RFFT_TX_FRAME_WIDTH - (j + 1)];
 			}
 		}
 
-		stft_packet = (stft_packet + 1) % RFFT_FRAME_PACKETS;
+		rfft_line = (rfft_line + 1) % RFFT_TX_FRAME_HEIGHT;
 
-		if (stft_packet == 0 || stft_packet == RFFT_FRAME_HALF_PACKETS) {
+		prepare_index = rfft_line / MODEL_INPUT_STEP;
+		infer_index = prepare_index ? prepare_index - 1 : MODEL_DRAM0_BUFFER_NUMBER - 1;
+
+		Dram0PrepareBufferPtr = Dram0BufferPtrs[prepare_index];
+		Dram0InferBufferPtr = Dram0BufferPtrs[infer_index];
+
+		if (rfft_line % MODEL_INPUT_STEP == 0) {
 			if (instructions_run_offset)
 				goto error;
 			// Inference took longer than 500ms
-
-			u8 *Tmp = Dram0PrepareBufferPtr;
-			Dram0PrepareBufferPtr = Dram0InferBufferPtr;
-			Dram0InferBufferPtr = Tmp;
 
 			size_t buffer_offset = buffer.offset;
 			buffer.offset = 0;
@@ -466,7 +449,7 @@ int main() {
 						MODEL_DT max2 = 0;
 						size_t i = argmax(4, (MODEL_DT*) Dram0InferBufferPtr, &max, &max2);
 
-						if ((max - max2) > 64 * 256) {
+						if ((max - max2) > 32 * 256) {
 							xil_printf("%s = %d (%d)\r\n", commands[i], max, max2);
 						}
 
