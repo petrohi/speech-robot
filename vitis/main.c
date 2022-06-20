@@ -93,18 +93,20 @@ void print_float(float f) {
 #define ALIGNMENT 0x10000
 #define ALIGN(s) (s / ALIGNMENT + 1) * ALIGNMENT
 
-#define START ((u8 *) XPAR_MIG7SERIES_0_BASEADDR + 0x100000)
+#define START ((u8 *) XPAR_MIG7SERIES_0_BASEADDR)
 
-static size_t argmax(size_t size, const short *buffer) {
+static size_t argmax(size_t size, const short *buffer, short *max, short *max2) {
 	if (!size)
 		return -1;
 
-	short max = buffer[0];
+	*max = buffer[0];
+	*max2 = *max;
 	size_t max_i = 0;
 
 	for (size_t i = 1; i < size; i++)
-		if (buffer[i] > max) {
-			max = buffer[i];
+		if (buffer[i] > *max) {
+			*max2 = *max;
+			*max = buffer[i];
 			max_i = i;
 		}
 
@@ -489,14 +491,19 @@ int main() {
 							(TENSIL_ARCHITECTURE_DRAM0_DEPTH - 2)
 									* arch.array_size, arch.array_size) == 0) {
 
-						size_t i = argmax(8, (short*) Dram0InferBufferPtr);
-						float max = (float) ((short*) Dram0InferBufferPtr)[i]
-								/ 256.0;
+						short max = 0;
+						short max2 = 0;
+						size_t i = argmax(8, (short*) Dram0InferBufferPtr, &max, &max2);
 
-						if (max > 50.0) {
+						float maxf = (float)max / 256.0;
+						float max2f = (float)max2 / 256.0;
+
+						if (maxf - max2f > 40.0/* && max2 < 50.0*/) {
 							xil_printf("%s = ", commands[i]);
-							print_float(max);
-							xil_printf("\r\n");
+							print_float(maxf);
+							xil_printf(" (");
+							print_float(max2f);
+							xil_printf(")\r\n");
 						}
 
 						instructions_run_offset = 0;
