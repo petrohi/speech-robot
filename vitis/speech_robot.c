@@ -59,10 +59,10 @@ XTmrCtr tmr_ctr;
 #define MODEL_INPUT_SIZE (MODEL_INPUT_HEIGHT * MODEL_INPUT_LINE_SIZE)
 
 #define MODEL_CONST_BASE (XPAR_AXI_QUAD_SPI_0_AXI4_BASEADDR + 0x500000)
-#define MODEL_CONST_SIZE_VECTORS 93808
+#define MODEL_CONST_SIZE_VECTORS 49390
 
 #define MODEL_PROG_BASE (XPAR_AXI_QUAD_SPI_0_AXI4_BASEADDR + 0x400000)
-#define MODEL_PROG_SIZE 642064
+#define MODEL_PROG_SIZE 457904
 
 #define BUFFER_ALIGNMENT 0x10000
 #define BUFFER_ALIGN(s) (s / BUFFER_ALIGNMENT + 1) * BUFFER_ALIGNMENT
@@ -425,7 +425,7 @@ int main() {
 						MODEL_DT max2 = 0;
 						size_t i = argmax(4, (MODEL_DT*) dram0_infer_buffer_ptr, &max, &max2);
 
-						if (max > 16 * 256/* && (max - max2) > 32 * 256*/) {
+						if (max > 8 * 256/* && (max - max2) > 32 * 256*/) {
 							xil_printf("%s = %d (%d)\r\n", commands[i], max, max - max2);
 						}
 
