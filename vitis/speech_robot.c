@@ -3,6 +3,7 @@
 
 #include <stdlib.h>
 #include <stdint.h>
+#include <stdbool.h>
 #include "platform.h"
 #include "xil_printf.h"
 #include "xgpio_l.h"
@@ -16,9 +17,9 @@
 #include "tensil/instruction_buffer.h"
 #include "tensil/dram.h"
 
-XAxiDma AcqAxiDma;
-XAxiDma RfftAxiDma;
-XTmrCtr Timer;
+XAxiDma acq_axi_dma;
+XAxiDma rfft_axi_dma;
+XTmrCtr tmr_ctr;
 
 /*void print_float(float f) {
 	if (f < 0.0)
@@ -63,10 +64,9 @@ XTmrCtr Timer;
 #define MODEL_PROG_BASE (XPAR_AXI_QUAD_SPI_0_AXI4_BASEADDR + 0x400000)
 #define MODEL_PROG_SIZE 642064
 
-#define ALIGNMENT 0x10000
-#define ALIGN(s) (s / ALIGNMENT + 1) * ALIGNMENT
-
-#define START ((u8 *) XPAR_MIG7SERIES_0_BASEADDR)
+#define BUFFER_ALIGNMENT 0x10000
+#define BUFFER_ALIGN(s) (s / BUFFER_ALIGNMENT + 1) * BUFFER_ALIGNMENT
+#define BUFFER_START ((u8 *) XPAR_MIG7SERIES_0_BASEADDR)
 
 static size_t argmax(size_t size, const MODEL_DT *buffer, MODEL_DT *max, MODEL_DT *max2) {
 	if (!size)
@@ -93,105 +93,105 @@ static size_t argmax(size_t size, const MODEL_DT *buffer, MODEL_DT *max, MODEL_D
 int main() {
 	init_platform();
 
-	int Status;
+	int status;
 
-	Status = XTmrCtr_Initialize(&Timer, XPAR_TMRCTR_0_DEVICE_ID);
+	status = XTmrCtr_Initialize(&tmr_ctr, XPAR_TMRCTR_0_DEVICE_ID);
 
-	if (Status)
+	if (status)
 		goto error;
 
-	u8* RxBdSpace = START;
-	u8* TxBdSpace = RxBdSpace
-			+ ALIGN(XAxiDma_BdRingMemCalc(XAXIDMA_BD_MINIMUM_ALIGNMENT, 1));
+	u8* rfft_rx_bd_space = BUFFER_START;
+	u8* rfft_tx_bd_space = rfft_rx_bd_space
+			+ BUFFER_ALIGN(XAxiDma_BdRingMemCalc(XAXIDMA_BD_MINIMUM_ALIGNMENT, 1));
 
-	u8 *AcqBufferPtr = TxBdSpace
-			+ ALIGN(XAxiDma_BdRingMemCalc(XAXIDMA_BD_MINIMUM_ALIGNMENT, 2));
-	u8 *RfftTxBufferPtr = AcqBufferPtr + ALIGN(ACQ_PACKET_DOUBLE_SIZE);
-	u8 *RfftRxBufferPtr = RfftTxBufferPtr + ALIGN(RFFT_TX_PACKET_SIZE);
+	u8 *acq_buffer_ptr = rfft_tx_bd_space
+			+ BUFFER_ALIGN(XAxiDma_BdRingMemCalc(XAXIDMA_BD_MINIMUM_ALIGNMENT, 2));
+	u8 *rfft_tx_buffer_ptr = acq_buffer_ptr + BUFFER_ALIGN(ACQ_PACKET_DOUBLE_SIZE);
+	u8 *rfft_rx_buffer_ptr = rfft_tx_buffer_ptr + BUFFER_ALIGN(RFFT_TX_PACKET_SIZE);
 
-	u8 *Dram0BufferPtrs[MODEL_DRAM0_BUFFER_NUMBER];
+	u8 *drma0_buffer_ptrs[MODEL_DRAM0_BUFFER_NUMBER];
 
-	Dram0BufferPtrs[0] = RfftRxBufferPtr + ALIGN(RFFT_TX_FRAME_SIZE);
+	drma0_buffer_ptrs[0] = rfft_rx_buffer_ptr + BUFFER_ALIGN(RFFT_TX_FRAME_SIZE);
 
 	for (size_t i = 1; i < MODEL_DRAM0_BUFFER_NUMBER; i++) {
-		Dram0BufferPtrs[i] =
-				Dram0BufferPtrs[i - 1]
-						+ ALIGN(
+		drma0_buffer_ptrs[i] =
+				drma0_buffer_ptrs[i - 1]
+						+ BUFFER_ALIGN(
 								TENSIL_ARCHITECTURE_DRAM0_DEPTH * TENSIL_ARCHITECTURE_ARRAY_SIZE * sizeof(MODEL_DT));
 	}
 
-	u8 *Dram1BufferPtr =
-			Dram0BufferPtrs[MODEL_DRAM0_BUFFER_NUMBER - 1]
-					+ ALIGN(
+	u8 *dram1_buffer_ptr =
+			drma0_buffer_ptrs[MODEL_DRAM0_BUFFER_NUMBER - 1]
+					+ BUFFER_ALIGN(
 							TENSIL_ARCHITECTURE_DRAM0_DEPTH * TENSIL_ARCHITECTURE_ARRAY_SIZE * sizeof(MODEL_DT));
-	u8 *ProgBufferPtr =
-			Dram1BufferPtr
-					+ ALIGN(
+	u8 *prog_buffer_ptr =
+			dram1_buffer_ptr
+					+ BUFFER_ALIGN(
 							TENSIL_ARCHITECTURE_DRAM1_DEPTH * TENSIL_ARCHITECTURE_ARRAY_SIZE * sizeof(MODEL_DT));
 
-	XAxiDma_Config *AcqCfgPtr = XAxiDma_LookupConfig(
+	XAxiDma_Config *acq_cfg_ptr = XAxiDma_LookupConfig(
 			XPAR_ACQUISITION_AXI_DMA_0_DEVICE_ID);
-	Status = XAxiDma_CfgInitialize(&AcqAxiDma, AcqCfgPtr);
+	status = XAxiDma_CfgInitialize(&acq_axi_dma, acq_cfg_ptr);
 
-	if (Status)
+	if (status)
 		goto error;
 
 	XGpio_WriteReg(XPAR_GPIO_0_BASEADDR, XGPIO_DATA_OFFSET, 0x1);
 
-	XAxiDma_Config *RfftCfgPtr = XAxiDma_LookupConfig(
+	XAxiDma_Config *rfft_cfg_ptr = XAxiDma_LookupConfig(
 			XPAR_RFFT_AXI_DMA_0_DEVICE_ID);
-	Status = XAxiDma_CfgInitialize(&RfftAxiDma, RfftCfgPtr);
+	status = XAxiDma_CfgInitialize(&rfft_axi_dma, rfft_cfg_ptr);
 
-	if (Status)
+	if (status)
 		goto error;
 
-	XAxiDma_BdRing *RxRingPtr = XAxiDma_GetRxRing(&RfftAxiDma);
-	XAxiDma_BdRing *TxRingPtr = XAxiDma_GetTxRing(&RfftAxiDma);
+	XAxiDma_BdRing *rfft_rx_ring_ptr = XAxiDma_GetRxRing(&rfft_axi_dma);
+	XAxiDma_BdRing *rfft_tx_ring_ptr = XAxiDma_GetTxRing(&rfft_axi_dma);
 
-	XAxiDma_BdRingIntDisable(RxRingPtr, XAXIDMA_IRQ_ALL_MASK);
-	XAxiDma_BdRingIntDisable(TxRingPtr, XAXIDMA_IRQ_ALL_MASK);
+	XAxiDma_BdRingIntDisable(rfft_rx_ring_ptr, XAXIDMA_IRQ_ALL_MASK);
+	XAxiDma_BdRingIntDisable(rfft_tx_ring_ptr, XAXIDMA_IRQ_ALL_MASK);
 
-	XAxiDma_BdRingSetCoalesce(RxRingPtr, 1, 0);
-	XAxiDma_BdRingSetCoalesce(TxRingPtr, 1, 0);
+	XAxiDma_BdRingSetCoalesce(rfft_rx_ring_ptr, 1, 0);
+	XAxiDma_BdRingSetCoalesce(rfft_tx_ring_ptr, 1, 0);
 
-	Status = XAxiDma_BdRingCreate(RxRingPtr, (UINTPTR) RxBdSpace,
-			(UINTPTR) RxBdSpace, XAXIDMA_BD_MINIMUM_ALIGNMENT, 1);
+	status = XAxiDma_BdRingCreate(rfft_rx_ring_ptr, (UINTPTR) rfft_rx_bd_space,
+			(UINTPTR) rfft_rx_bd_space, XAXIDMA_BD_MINIMUM_ALIGNMENT, 1);
 
-	if (Status)
+	if (status)
 		goto error;
 
-	Status = XAxiDma_BdRingCreate(TxRingPtr, (UINTPTR) TxBdSpace,
-			(UINTPTR) TxBdSpace, XAXIDMA_BD_MINIMUM_ALIGNMENT, 2);
+	status = XAxiDma_BdRingCreate(rfft_tx_ring_ptr, (UINTPTR) rfft_tx_bd_space,
+			(UINTPTR) rfft_tx_bd_space, XAXIDMA_BD_MINIMUM_ALIGNMENT, 2);
 
-	if (Status)
+	if (status)
 		goto error;
 
-	XAxiDma_Bd BdTemplate;
-	XAxiDma_BdClear(&BdTemplate);
+	XAxiDma_Bd bd_template;
+	XAxiDma_BdClear(&bd_template);
 
-	Status = XAxiDma_BdRingClone(RxRingPtr, &BdTemplate);
+	status = XAxiDma_BdRingClone(rfft_rx_ring_ptr, &bd_template);
 
-	if (Status)
+	if (status)
 		goto error;
 
-	Status = XAxiDma_BdRingClone(TxRingPtr, &BdTemplate);
+	status = XAxiDma_BdRingClone(rfft_tx_ring_ptr, &bd_template);
 
-	if (Status)
+	if (status)
 		goto error;
 
-	Status = XAxiDma_BdRingStart(RxRingPtr);
+	status = XAxiDma_BdRingStart(rfft_rx_ring_ptr);
 
-	if (Status)
+	if (status)
 		goto error;
 
-	Status = XAxiDma_BdRingStart(TxRingPtr);
+	status = XAxiDma_BdRingStart(rfft_tx_ring_ptr);
 
-	if (Status)
+	if (status)
 		goto error;
 
-	memset((void *) AcqBufferPtr, 0, ACQ_PACKET_DOUBLE_SIZE);
-	memset((void *) RfftTxBufferPtr, 0, RFFT_TX_PACKET_SIZE);
-	memset((void *) RfftRxBufferPtr, 0, RFFT_TX_FRAME_SIZE);
+	memset((void *) acq_buffer_ptr, 0, ACQ_PACKET_DOUBLE_SIZE);
+	memset((void *) rfft_tx_buffer_ptr, 0, RFFT_TX_PACKET_SIZE);
+	memset((void *) rfft_rx_buffer_ptr, 0, RFFT_TX_FRAME_SIZE);
 
 	const char *commands[] = { "stop", "go", "left", "right" };
 
@@ -220,7 +220,7 @@ int main() {
 	if (error)
 		goto error;
 
-	struct instruction_buffer buffer = { .ptr = ProgBufferPtr, .size = 0x100000,
+	struct instruction_buffer buffer = { .ptr = prog_buffer_ptr, .size = 0x100000,
 			.offset = 0 };
 	buffer_reset(&buffer);
 
@@ -231,7 +231,7 @@ int main() {
 		goto error;
 
 	error = buffer_append_config_instruction(&buffer, &layout,
-			CONFIG_REGISTER_DRAM1_OFFSET, CONFIG_DRAM_OFFSET(Dram1BufferPtr));
+			CONFIG_REGISTER_DRAM1_OFFSET, CONFIG_DRAM_OFFSET(dram1_buffer_ptr));
 
 	if (error)
 		goto error;
@@ -242,12 +242,12 @@ int main() {
 	if (error)
 		goto error;
 
-	memcpy((void *) Dram1BufferPtr,
+	memcpy((void *) dram1_buffer_ptr,
 			(const void*) MODEL_CONST_BASE,
 			MODEL_CONST_SIZE_VECTORS * TENSIL_ARCHITECTURE_ARRAY_SIZE * sizeof(MODEL_DT));
 
 	//Xil_DCacheFlushRange((UINTPTR)Dram0BufferPtr, TENSIL_ARCHITECTURE_DRAM0_DEPTH * TENSIL_ARCHITECTURE_ARRAY_SIZE * sizeof(MODEL_DT));
-	//Xil_DCacheFlushRange((UINTPTR)Dram1BufferPtr, TENSIL_ARCHITECTURE_DRAM1_DEPTH * TENSIL_ARCHITECTURE_ARRAY_SIZE * sizeof(MODEL_DT));
+	//Xil_DCacheFlushRange((UINTPTR)dram1_buffer_ptr, TENSIL_ARCHITECTURE_DRAM1_DEPTH * TENSIL_ARCHITECTURE_ARRAY_SIZE * sizeof(MODEL_DT));
 
 	error = buffer_append_program(&buffer,
 			(const u8*) MODEL_PROG_BASE, MODEL_PROG_SIZE);
@@ -280,131 +280,107 @@ int main() {
 
 	size_t instructions_run_offset = 0;
 
-	while (1) {
+	while (true) {
 		size_t acq_offset = (1 - acq_reversed) * ACQ_PACKET_SIZE;
 
-		Status = XAxiDma_SimpleTransfer(&AcqAxiDma,
-				(UINTPTR) (AcqBufferPtr + acq_offset),
+		status = XAxiDma_SimpleTransfer(&acq_axi_dma,
+				(UINTPTR) (acq_buffer_ptr + acq_offset),
 				ACQ_PACKET_SIZE, XAXIDMA_DEVICE_TO_DMA);
 
-		if (Status)
+		if (status)
 			goto error;
 
 		acq_reversed = (acq_reversed + 1) % 2;
 		acq_offset = (1 - acq_reversed) * ACQ_PACKET_SIZE;
 
-		memcpy((void*) (RfftTxBufferPtr + acq_offset),
-				(const void*) (AcqBufferPtr + acq_offset),
+		memcpy((void*) (rfft_tx_buffer_ptr + acq_offset),
+				(const void*) (acq_buffer_ptr + acq_offset),
 				ACQ_PACKET_SIZE);
 
-		XAxiDma_Bd *TxBdHeadPtr;
-		Status = XAxiDma_BdRingAlloc(TxRingPtr, 2, &TxBdHeadPtr);
+		XAxiDma_Bd *rfft_rx_bd_head_ptr;
+		status = XAxiDma_BdRingAlloc(rfft_tx_ring_ptr, 2, &rfft_rx_bd_head_ptr);
 
-		if (Status)
+		if (status)
 			goto error;
 
-		XAxiDma_Bd *TxBdPtr = TxBdHeadPtr;
+		XAxiDma_Bd *cur_bd_ptr = rfft_rx_bd_head_ptr;
 		for (size_t i = 0; i < 2; i++) {
 			size_t tx_offset = abs(i - acq_reversed) * ACQ_PACKET_SIZE;
 
-			Status = XAxiDma_BdSetBufAddr(TxBdPtr,
-					(UINTPTR) (RfftTxBufferPtr + tx_offset));
+			status = XAxiDma_BdSetBufAddr(cur_bd_ptr,
+					(UINTPTR) (rfft_tx_buffer_ptr + tx_offset));
 
-			if (Status)
+			if (status)
 				goto error;
 
-			Status = XAxiDma_BdSetLength(TxBdPtr, ACQ_PACKET_SIZE,
-					TxRingPtr->MaxTransferLen);
+			status = XAxiDma_BdSetLength(cur_bd_ptr, ACQ_PACKET_SIZE,
+					rfft_tx_ring_ptr->MaxTransferLen);
 
-			if (Status)
+			if (status)
 				goto error;
 
-			XAxiDma_BdSetCtrl(TxBdPtr,
+			XAxiDma_BdSetCtrl(cur_bd_ptr,
 					i ? XAXIDMA_BD_CTRL_TXEOF_MASK : XAXIDMA_BD_CTRL_TXSOF_MASK);
-			XAxiDma_BdSetId(TxBdPtr, i);
+			XAxiDma_BdSetId(cur_bd_ptr, i);
 
-			TxBdPtr = (XAxiDma_Bd *) XAxiDma_BdRingNext(TxRingPtr, TxBdPtr);
+			cur_bd_ptr = (XAxiDma_Bd *) XAxiDma_BdRingNext(rfft_tx_ring_ptr, cur_bd_ptr);
 		}
 
-		Status = XAxiDma_BdRingToHw(TxRingPtr, 2, TxBdHeadPtr);
+		status = XAxiDma_BdRingToHw(rfft_tx_ring_ptr, 2, rfft_rx_bd_head_ptr);
 
-		if (Status)
+		if (status)
 			goto error;
 
-		XAxiDma_Bd *RxBdHeadPtr;
-		Status = XAxiDma_BdRingAlloc(RxRingPtr, 1, &RxBdHeadPtr);
+		XAxiDma_Bd *rfft_rx_head_ptr;
+		status = XAxiDma_BdRingAlloc(rfft_rx_ring_ptr, 1, &rfft_rx_head_ptr);
 
-		if (Status)
+		if (status)
 			goto error;
 
-		XAxiDma_Bd *RxBdPtr = RxBdHeadPtr;
+		cur_bd_ptr = rfft_rx_head_ptr;
 
-		Status = XAxiDma_BdSetBufAddr(RxBdPtr,
-				(UINTPTR) (RfftRxBufferPtr + rfft_line * RFFT_TX_FRAME_LINE_SIZE));
+		status = XAxiDma_BdSetBufAddr(cur_bd_ptr,
+				(UINTPTR) (rfft_rx_buffer_ptr + rfft_line * RFFT_TX_FRAME_LINE_SIZE));
 
-		if (Status)
+		if (status)
 			goto error;
 
-		Status = XAxiDma_BdSetLength(RxBdPtr, RFFT_TX_FRAME_LINE_SIZE,
-				RxRingPtr->MaxTransferLen);
+		status = XAxiDma_BdSetLength(cur_bd_ptr, RFFT_TX_FRAME_LINE_SIZE,
+				rfft_rx_ring_ptr->MaxTransferLen);
 
-		if (Status)
+		if (status)
 			goto error;
 
-		XAxiDma_BdSetCtrl(RxBdPtr, 0);
-		XAxiDma_BdSetId(RxBdPtr, 0);
+		XAxiDma_BdSetCtrl(cur_bd_ptr, 0);
+		XAxiDma_BdSetId(cur_bd_ptr, 0);
 
-		Status = XAxiDma_BdRingToHw(RxRingPtr, 1, RxBdHeadPtr);
+		status = XAxiDma_BdRingToHw(rfft_rx_ring_ptr, 1, rfft_rx_head_ptr);
 
-		if (Status)
+		if (status)
 			goto error;
 
-		while (XAxiDma_BdRingFromHw(RxRingPtr, XAXIDMA_ALL_BDS, &RxBdHeadPtr)
+		while (XAxiDma_BdRingFromHw(rfft_rx_ring_ptr, XAXIDMA_ALL_BDS, &rfft_rx_head_ptr)
 				!= 1
-				|| XAxiDma_BdRingFromHw(TxRingPtr, XAXIDMA_ALL_BDS,
-						&TxBdHeadPtr) != 2)
+				|| XAxiDma_BdRingFromHw(rfft_tx_ring_ptr, XAXIDMA_ALL_BDS,
+						&rfft_rx_bd_head_ptr) != 2)
 			;
 
-		Status = XAxiDma_BdRingFree(TxRingPtr, 2, TxBdHeadPtr);
+		status = XAxiDma_BdRingFree(rfft_tx_ring_ptr, 2, rfft_rx_bd_head_ptr);
 
-		if (Status)
+		if (status)
 			goto error;
 
-		Status = XAxiDma_BdRingFree(RxRingPtr, 1, RxBdHeadPtr);
+		status = XAxiDma_BdRingFree(rfft_rx_ring_ptr, 1, rfft_rx_head_ptr);
 
-		if (Status)
+		if (status)
 			goto error;
 
 		size_t prepare_index = rfft_line / MODEL_INPUT_STEP;
 		size_t infer_index = prepare_index ? prepare_index - 1 : MODEL_DRAM0_BUFFER_NUMBER - 1;
 
-		u8 *Dram0PrepareBufferPtr = Dram0BufferPtrs[prepare_index];
-		u8 *Dram0InferBufferPtr = Dram0BufferPtrs[infer_index];
+		u8 *dram0_prepare_buffer_ptr = drma0_buffer_ptrs[prepare_index];
+		u8 *dram0_infer_buffer_ptr = drma0_buffer_ptrs[infer_index];
 
-		for (size_t i = 0; i < MODEL_DRAM0_BUFFER_NUMBER; i++) {
-			int shifted_line = rfft_line - i * MODEL_INPUT_STEP;
-
-			size_t rfft_source_line = shifted_line < 0 ? RFFT_TX_FRAME_HEIGHT + shifted_line : shifted_line;
-			size_t model_dest_line = (rfft_line % MODEL_INPUT_STEP) + (MODEL_DRAM0_BUFFER_NUMBER - 1 - i) * MODEL_INPUT_STEP;
-
-			u8 *RfftRxBasePtr = RfftRxBufferPtr + rfft_source_line * RFFT_TX_FRAME_LINE_SIZE;
-			u8 *Dram0BasePtr = Dram0PrepareBufferPtr + model_dest_line * MODEL_INPUT_LINE_SIZE;
-
-			memset((void*) Dram0BasePtr, 0, MODEL_INPUT_LINE_SIZE);
-
-			for (size_t j = 0; j < MODEL_INPUT_WIDTH; j++) {
-				((MODEL_DT *) Dram0BasePtr)[j * MODEL_VECTOR_LENGTH] =
-						((MODEL_DT *) RfftRxBasePtr)[RFFT_TX_FRAME_WIDTH - (j + 1)];
-			}
-		}
-
-		rfft_line = (rfft_line + 1) % RFFT_TX_FRAME_HEIGHT;
-
-		prepare_index = rfft_line / MODEL_INPUT_STEP;
-		infer_index = prepare_index ? prepare_index - 1 : MODEL_DRAM0_BUFFER_NUMBER - 1;
-
-		Dram0PrepareBufferPtr = Dram0BufferPtrs[prepare_index];
-		Dram0InferBufferPtr = Dram0BufferPtrs[infer_index];
 
 		if (rfft_line % MODEL_INPUT_STEP == 0) {
 			if (instructions_run_offset)
@@ -416,15 +392,15 @@ int main() {
 
 			error = buffer_append_config_instruction(&buffer, &layout,
 					CONFIG_REGISTER_DRAM0_OFFSET,
-					CONFIG_DRAM_OFFSET(Dram0InferBufferPtr));
+					CONFIG_DRAM_OFFSET(dram0_infer_buffer_ptr));
 
 			buffer.offset = buffer_offset;
 
-			dram_fill_scalars(Dram0InferBufferPtr, arch.data_type,
+			dram_fill_scalars(dram0_infer_buffer_ptr, arch.data_type,
 					(TENSIL_ARCHITECTURE_DRAM0_DEPTH - 1) * arch.array_size, 0,
 					arch.array_size);
 
-			dram_fill_scalars(Dram0InferBufferPtr, arch.data_type,
+			dram_fill_scalars(dram0_infer_buffer_ptr, arch.data_type,
 					(TENSIL_ARCHITECTURE_DRAM0_DEPTH - 2) * arch.array_size,
 					0xff, arch.array_size);
 
@@ -438,7 +414,7 @@ int main() {
 		if (instructions_run_offset) {
 			if (!tcu_is_instructions_busy(&tcu)) {
 				if (instructions_run_offset == buffer.offset) {
-					if (dram_compare_scalars(Dram0InferBufferPtr,
+					if (dram_compare_scalars(dram0_infer_buffer_ptr,
 							arch.data_type,
 							(TENSIL_ARCHITECTURE_DRAM0_DEPTH - 1)
 									* arch.array_size,
@@ -447,10 +423,10 @@ int main() {
 
 						MODEL_DT max = 0;
 						MODEL_DT max2 = 0;
-						size_t i = argmax(4, (MODEL_DT*) Dram0InferBufferPtr, &max, &max2);
+						size_t i = argmax(4, (MODEL_DT*) dram0_infer_buffer_ptr, &max, &max2);
 
-						if ((max - max2) > 32 * 256) {
-							xil_printf("%s = %d (%d)\r\n", commands[i], max, max2);
+						if (max > 16 * 256/* && (max - max2) > 32 * 256*/) {
+							xil_printf("%s = %d (%d)\r\n", commands[i], max, max - max2);
 						}
 
 						instructions_run_offset = 0;
@@ -465,7 +441,26 @@ int main() {
 			}
 		}
 
-		while (XAxiDma_Busy(&AcqAxiDma, XAXIDMA_DEVICE_TO_DMA))
+		for (size_t i = 0; i < MODEL_DRAM0_BUFFER_NUMBER; i++) {
+			int shifted_line = rfft_line - i * MODEL_INPUT_STEP;
+
+			size_t rfft_source_line = shifted_line < 0 ? RFFT_TX_FRAME_HEIGHT + shifted_line : shifted_line;
+			size_t model_dest_line = (rfft_line % MODEL_INPUT_STEP) + (MODEL_DRAM0_BUFFER_NUMBER - 1 - i) * MODEL_INPUT_STEP;
+
+			u8 *rfft_rx_line_ptr = rfft_rx_buffer_ptr + rfft_source_line * RFFT_TX_FRAME_LINE_SIZE;
+			u8 *dram0_line_ptr = dram0_prepare_buffer_ptr + model_dest_line * MODEL_INPUT_LINE_SIZE;
+
+			memset((void*) dram0_line_ptr, 0, MODEL_INPUT_LINE_SIZE);
+
+			for (size_t j = 0; j < MODEL_INPUT_WIDTH; j++) {
+				((MODEL_DT *) dram0_line_ptr)[j * MODEL_VECTOR_LENGTH] =
+						((MODEL_DT *) rfft_rx_line_ptr)[RFFT_TX_FRAME_WIDTH - (j + 1)];
+			}
+		}
+
+		rfft_line = (rfft_line + 1) % RFFT_TX_FRAME_HEIGHT;
+
+		while (XAxiDma_Busy(&acq_axi_dma, XAXIDMA_DEVICE_TO_DMA))
 			;
 
 	}
@@ -481,11 +476,11 @@ int main() {
 	 xil_printf(",");
 	 }*/
 
-	//XTmrCtr_Reset(&Timer, 0);
-	//XTmrCtr_Start(&Timer, 0);
+	//XTmrCtr_Reset(&tmr_ctr, 0);
+	//XTmrCtr_Start(&tmr_ctr, 0);
 
-	//XTmrCtr_Stop(&Timer, 0);
-	//xil_printf("CYCLES: %d\r\n",  XTmrCtr_GetValue(&Timer, 0));
+	//XTmrCtr_Stop(&tmr_ctr, 0);
+	//xil_printf("CYCLES: %d\r\n",  XTmrCtr_GetValue(&tmr_ctr, 0));
 
 	error: cleanup_platform();
 	return 0;
