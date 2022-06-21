@@ -771,6 +771,115 @@ proc create_hier_cell_microblaze_0_local_memory { parentCell nameHier } {
   current_bd_instance $oldCurInst
 }
 
+# Hierarchical cell: exp
+proc create_hier_cell_exp { parentCell nameHier } {
+
+  variable script_folder
+
+  if { $parentCell eq "" || $nameHier eq "" } {
+     catch {common::send_gid_msg -ssname BD::TCL -id 2092 -severity "ERROR" "create_hier_cell_exp() - Empty argument(s)!"}
+     return
+  }
+
+  # Get object for parentCell
+  set parentObj [get_bd_cells $parentCell]
+  if { $parentObj == "" } {
+     catch {common::send_gid_msg -ssname BD::TCL -id 2090 -severity "ERROR" "Unable to find parent cell <$parentCell>!"}
+     return
+  }
+
+  # Make sure parentObj is hier blk
+  set parentType [get_property TYPE $parentObj]
+  if { $parentType ne "hier" } {
+     catch {common::send_gid_msg -ssname BD::TCL -id 2091 -severity "ERROR" "Parent <$parentObj> has TYPE = <$parentType>. Expected to be <hier>."}
+     return
+  }
+
+  # Save current instance; Restore later
+  set oldCurInst [current_bd_instance .]
+
+  # Set parent object as current
+  current_bd_instance $parentObj
+
+  # Create cell and set as current instance
+  set hier_obj [create_bd_cell -type hier $nameHier]
+  current_bd_instance $hier_obj
+
+  # Create interface pins
+  create_bd_intf_pin -mode Master -vlnv xilinx.com:interface:aximm_rtl:1.0 M_AXI_MM2S
+
+  create_bd_intf_pin -mode Master -vlnv xilinx.com:interface:aximm_rtl:1.0 M_AXI_S2MM
+
+  create_bd_intf_pin -mode Slave -vlnv xilinx.com:interface:aximm_rtl:1.0 S_AXI_LITE
+
+
+  # Create pins
+  create_bd_pin -dir I -type rst axi_resetn
+  create_bd_pin -dir I -type clk m_axi_mm2s_aclk
+
+  # Create instance: axi_dma_0, and set properties
+  set axi_dma_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:axi_dma:7.1 axi_dma_0 ]
+  set_property -dict [ list \
+   CONFIG.c_include_s2mm {1} \
+   CONFIG.c_include_sg {0} \
+   CONFIG.c_m_axis_mm2s_tdata_width {16} \
+   CONFIG.c_sg_include_stscntrl_strm {0} \
+ ] $axi_dma_0
+
+  # Create instance: exp_0, and set properties
+  set exp_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:floating_point:7.1 exp_0 ]
+  set_property -dict [ list \
+   CONFIG.A_Precision_Type {Double} \
+   CONFIG.C_Accum_Input_Msb {32} \
+   CONFIG.C_Accum_Lsb {-31} \
+   CONFIG.C_Accum_Msb {32} \
+   CONFIG.C_Latency {45} \
+   CONFIG.C_Mult_Usage {Medium_Usage} \
+   CONFIG.C_Rate {1} \
+   CONFIG.C_Result_Exponent_Width {11} \
+   CONFIG.C_Result_Fraction_Width {53} \
+   CONFIG.Has_A_TLAST {true} \
+   CONFIG.Operation_Type {Exponential} \
+   CONFIG.RESULT_TLAST_Behv {Pass_A_TLAST} \
+   CONFIG.Result_Precision_Type {Double} \
+ ] $exp_0
+
+  # Create instance: to_float_0, and set properties
+  set to_float_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:floating_point:7.1 to_float_0 ]
+  set_property -dict [ list \
+   CONFIG.A_Precision_Type {Custom} \
+   CONFIG.C_A_Exponent_Width {8} \
+   CONFIG.C_A_Fraction_Width {8} \
+   CONFIG.C_Accum_Input_Msb {32} \
+   CONFIG.C_Accum_Lsb {-31} \
+   CONFIG.C_Accum_Msb {32} \
+   CONFIG.C_Latency {7} \
+   CONFIG.C_Mult_Usage {No_Usage} \
+   CONFIG.C_Rate {1} \
+   CONFIG.C_Result_Exponent_Width {11} \
+   CONFIG.C_Result_Fraction_Width {53} \
+   CONFIG.Has_A_TLAST {true} \
+   CONFIG.Operation_Type {Fixed_to_float} \
+   CONFIG.RESULT_TLAST_Behv {Pass_A_TLAST} \
+   CONFIG.Result_Precision_Type {Double} \
+ ] $to_float_0
+
+  # Create interface connections
+  connect_bd_intf_net -intf_net axi_dma_0_M_AXIS_MM2S [get_bd_intf_pins axi_dma_0/M_AXIS_MM2S] [get_bd_intf_pins to_float_0/S_AXIS_A]
+  connect_bd_intf_net -intf_net axi_dma_0_M_AXI_MM2S2 [get_bd_intf_pins M_AXI_MM2S] [get_bd_intf_pins axi_dma_0/M_AXI_MM2S]
+  connect_bd_intf_net -intf_net axi_dma_0_M_AXI_S2MM2 [get_bd_intf_pins M_AXI_S2MM] [get_bd_intf_pins axi_dma_0/M_AXI_S2MM]
+  connect_bd_intf_net -intf_net floating_point_0_M_AXIS_RESULT [get_bd_intf_pins axi_dma_0/S_AXIS_S2MM] [get_bd_intf_pins exp_0/M_AXIS_RESULT]
+  connect_bd_intf_net -intf_net smartconnect_0_M10_AXI [get_bd_intf_pins S_AXI_LITE] [get_bd_intf_pins axi_dma_0/S_AXI_LITE]
+  connect_bd_intf_net -intf_net to_float_0_M_AXIS_RESULT [get_bd_intf_pins exp_0/S_AXIS_A] [get_bd_intf_pins to_float_0/M_AXIS_RESULT]
+
+  # Create port connections
+  connect_bd_net -net microblaze_0_Clk [get_bd_pins m_axi_mm2s_aclk] [get_bd_pins axi_dma_0/m_axi_mm2s_aclk] [get_bd_pins axi_dma_0/m_axi_s2mm_aclk] [get_bd_pins axi_dma_0/s_axi_lite_aclk] [get_bd_pins exp_0/aclk] [get_bd_pins to_float_0/aclk]
+  connect_bd_net -net proc_sys_reset_0_peripheral_aresetn [get_bd_pins axi_resetn] [get_bd_pins axi_dma_0/axi_resetn]
+
+  # Restore current instance
+  current_bd_instance $oldCurInst
+}
+
 # Hierarchical cell: acquisition
 proc create_hier_cell_acquisition { parentCell nameHier } {
 
@@ -1035,6 +1144,9 @@ proc create_root_design { parentCell } {
    CONFIG.USE_BOARD_FLOW {true} \
  ] $clk_wiz_0
 
+  # Create instance: exp
+  create_hier_cell_exp [current_bd_instance .] exp
+
   # Create instance: mdm_1, and set properties
   set mdm_1 [ create_bd_cell -type ip -vlnv xilinx.com:ip:mdm:3.2 mdm_1 ]
 
@@ -1087,8 +1199,8 @@ proc create_root_design { parentCell } {
   set smartconnect_0 [ create_bd_cell -type ip -vlnv xilinx.com:ip:smartconnect:1.0 smartconnect_0 ]
   set_property -dict [ list \
    CONFIG.NUM_CLKS {3} \
-   CONFIG.NUM_MI {10} \
-   CONFIG.NUM_SI {8} \
+   CONFIG.NUM_MI {11} \
+   CONFIG.NUM_SI {10} \
  ] $smartconnect_0
 
   # Create instance: tcu
@@ -1097,8 +1209,10 @@ proc create_root_design { parentCell } {
   # Create interface connections
   connect_bd_intf_net -intf_net axi_dma_0_M_AXI_MM2S [get_bd_intf_pins rfft/M_AXI_MM2S] [get_bd_intf_pins smartconnect_0/S02_AXI]
   connect_bd_intf_net -intf_net axi_dma_0_M_AXI_MM2S1 [get_bd_intf_pins smartconnect_0/S05_AXI] [get_bd_intf_pins tcu/M_AXI_MM2S]
+  connect_bd_intf_net -intf_net axi_dma_0_M_AXI_MM2S2 [get_bd_intf_pins exp/M_AXI_MM2S] [get_bd_intf_pins smartconnect_0/S08_AXI]
   connect_bd_intf_net -intf_net axi_dma_0_M_AXI_S2MM [get_bd_intf_pins acquisition/M_AXI_S2MM_DMA] [get_bd_intf_pins smartconnect_0/S00_AXI]
   connect_bd_intf_net -intf_net axi_dma_0_M_AXI_S2MM1 [get_bd_intf_pins rfft/M_AXI_S2MM] [get_bd_intf_pins smartconnect_0/S03_AXI]
+  connect_bd_intf_net -intf_net axi_dma_0_M_AXI_S2MM2 [get_bd_intf_pins exp/M_AXI_S2MM] [get_bd_intf_pins smartconnect_0/S09_AXI]
   connect_bd_intf_net -intf_net axi_intc_0_interrupt [get_bd_intf_pins axi_intc_0/interrupt] [get_bd_intf_pins microblaze_0/INTERRUPT]
   connect_bd_intf_net -intf_net axi_quad_spi_0_SPI_0 [get_bd_intf_ports qspi_flash] [get_bd_intf_pins axi_quad_spi_0/SPI_0]
   connect_bd_intf_net -intf_net axi_uartlite_0_UART [get_bd_intf_ports usb_uart] [get_bd_intf_pins axi_uartlite_0/UART]
@@ -1117,6 +1231,7 @@ proc create_root_design { parentCell } {
   connect_bd_intf_net -intf_net smartconnect_0_M07_AXI [get_bd_intf_pins axi_quad_spi_0/AXI_LITE] [get_bd_intf_pins smartconnect_0/M07_AXI]
   connect_bd_intf_net -intf_net smartconnect_0_M08_AXI [get_bd_intf_pins axi_intc_0/s_axi] [get_bd_intf_pins smartconnect_0/M08_AXI]
   connect_bd_intf_net -intf_net smartconnect_0_M09_AXI [get_bd_intf_pins axi_quad_spi_0/AXI_FULL] [get_bd_intf_pins smartconnect_0/M09_AXI]
+  connect_bd_intf_net -intf_net smartconnect_0_M10_AXI [get_bd_intf_pins exp/S_AXI_LITE] [get_bd_intf_pins smartconnect_0/M10_AXI]
   connect_bd_intf_net -intf_net stft_M_AXI_SG [get_bd_intf_pins rfft/M_AXI_SG] [get_bd_intf_pins smartconnect_0/S04_AXI]
   connect_bd_intf_net -intf_net top_artya7100t_0_m_axi_dram0 [get_bd_intf_pins smartconnect_0/S06_AXI] [get_bd_intf_pins tcu/m_axi_dram0]
   connect_bd_intf_net -intf_net top_artya7100t_0_m_axi_dram1 [get_bd_intf_pins smartconnect_0/S07_AXI] [get_bd_intf_pins tcu/m_axi_dram1]
@@ -1130,12 +1245,12 @@ proc create_root_design { parentCell } {
   connect_bd_net -net clk_wiz_0_clk_out2 [get_bd_pins clk_wiz_0/clk_out2] [get_bd_pins mig_7series_0/clk_ref_i]
   connect_bd_net -net clk_wiz_0_locked [get_bd_pins clk_wiz_0/locked] [get_bd_pins rst_clk_wiz_0_100M/dcm_locked]
   connect_bd_net -net mdm_1_Debug_SYS_Rst [get_bd_pins mdm_1/Debug_SYS_Rst] [get_bd_pins proc_sys_reset_0/mb_debug_sys_rst]
-  connect_bd_net -net microblaze_0_Clk [get_bd_pins acquisition/aclk] [get_bd_pins axi_intc_0/s_axi_aclk] [get_bd_pins axi_quad_spi_0/s_axi4_aclk] [get_bd_pins axi_quad_spi_0/s_axi_aclk] [get_bd_pins axi_timer_0/s_axi_aclk] [get_bd_pins axi_uartlite_0/s_axi_aclk] [get_bd_pins clk_wiz_0/clk_out1] [get_bd_pins microblaze_0/Clk] [get_bd_pins microblaze_0_local_memory/LMB_Clk] [get_bd_pins mig_7series_0/sys_clk_i] [get_bd_pins rfft/m_axi_mm2s_aclk] [get_bd_pins rst_clk_wiz_0_100M/slowest_sync_clk] [get_bd_pins smartconnect_0/aclk]
+  connect_bd_net -net microblaze_0_Clk [get_bd_pins acquisition/aclk] [get_bd_pins axi_intc_0/s_axi_aclk] [get_bd_pins axi_quad_spi_0/s_axi4_aclk] [get_bd_pins axi_quad_spi_0/s_axi_aclk] [get_bd_pins axi_timer_0/s_axi_aclk] [get_bd_pins axi_uartlite_0/s_axi_aclk] [get_bd_pins clk_wiz_0/clk_out1] [get_bd_pins exp/m_axi_mm2s_aclk] [get_bd_pins microblaze_0/Clk] [get_bd_pins microblaze_0_local_memory/LMB_Clk] [get_bd_pins mig_7series_0/sys_clk_i] [get_bd_pins rfft/m_axi_mm2s_aclk] [get_bd_pins rst_clk_wiz_0_100M/slowest_sync_clk] [get_bd_pins smartconnect_0/aclk]
   connect_bd_net -net mig_7series_0_mmcm_locked [get_bd_pins mig_7series_0/mmcm_locked] [get_bd_pins proc_sys_reset_1/dcm_locked]
   connect_bd_net -net mig_7series_0_ui_clk [get_bd_pins mig_7series_0/ui_clk] [get_bd_pins proc_sys_reset_1/slowest_sync_clk] [get_bd_pins smartconnect_0/aclk1]
   connect_bd_net -net mig_7series_0_ui_clk_sync_rst [get_bd_pins mig_7series_0/ui_clk_sync_rst] [get_bd_pins proc_sys_reset_1/ext_reset_in]
   connect_bd_net -net proc_sys_reset_0_mb_reset [get_bd_pins microblaze_0/Reset] [get_bd_pins proc_sys_reset_0/mb_reset]
-  connect_bd_net -net proc_sys_reset_0_peripheral_aresetn [get_bd_pins acquisition/aresetn] [get_bd_pins axi_timer_0/s_axi_aresetn] [get_bd_pins axi_uartlite_0/s_axi_aresetn] [get_bd_pins proc_sys_reset_0/peripheral_aresetn] [get_bd_pins rfft/axi_resetn] [get_bd_pins smartconnect_0/aresetn] [get_bd_pins tcu/axi_resetn]
+  connect_bd_net -net proc_sys_reset_0_peripheral_aresetn [get_bd_pins acquisition/aresetn] [get_bd_pins axi_timer_0/s_axi_aresetn] [get_bd_pins axi_uartlite_0/s_axi_aresetn] [get_bd_pins exp/axi_resetn] [get_bd_pins proc_sys_reset_0/peripheral_aresetn] [get_bd_pins rfft/axi_resetn] [get_bd_pins smartconnect_0/aresetn] [get_bd_pins tcu/axi_resetn]
   connect_bd_net -net proc_sys_reset_1_peripheral_aresetn [get_bd_pins mig_7series_0/aresetn] [get_bd_pins proc_sys_reset_1/peripheral_aresetn]
   connect_bd_net -net reset_1 [get_bd_ports reset] [get_bd_pins clk_wiz_0/resetn] [get_bd_pins mig_7series_0/sys_rst] [get_bd_pins proc_sys_reset_0/ext_reset_in] [get_bd_pins rst_clk_wiz_0_100M/ext_reset_in]
   connect_bd_net -net rst_clk_wiz_0_100M_peripheral_aresetn [get_bd_pins axi_intc_0/s_axi_aresetn] [get_bd_pins axi_quad_spi_0/s_axi4_aresetn] [get_bd_pins axi_quad_spi_0/s_axi_aresetn] [get_bd_pins rst_clk_wiz_0_100M/peripheral_aresetn]
@@ -1146,6 +1261,7 @@ proc create_root_design { parentCell } {
   assign_bd_address -offset 0x41E00000 -range 0x00010000 -target_address_space [get_bd_addr_spaces microblaze_0/Data] [get_bd_addr_segs acquisition/axi_dma_0/S_AXI_LITE/Reg] -force
   assign_bd_address -offset 0x41E10000 -range 0x00010000 -target_address_space [get_bd_addr_spaces microblaze_0/Data] [get_bd_addr_segs rfft/axi_dma_0/S_AXI_LITE/Reg] -force
   assign_bd_address -offset 0x41E20000 -range 0x00010000 -target_address_space [get_bd_addr_spaces microblaze_0/Data] [get_bd_addr_segs tcu/axi_dma_0/S_AXI_LITE/Reg] -force
+  assign_bd_address -offset 0x41E30000 -range 0x00010000 -target_address_space [get_bd_addr_spaces microblaze_0/Data] [get_bd_addr_segs exp/axi_dma_0/S_AXI_LITE/Reg] -force
   assign_bd_address -offset 0x40000000 -range 0x00010000 -target_address_space [get_bd_addr_spaces microblaze_0/Data] [get_bd_addr_segs acquisition/axi_gpio_0/S_AXI/Reg] -force
   assign_bd_address -offset 0x41200000 -range 0x00010000 -target_address_space [get_bd_addr_spaces microblaze_0/Data] [get_bd_addr_segs axi_intc_0/S_AXI/Reg] -force
   assign_bd_address -offset 0x90000000 -range 0x01000000 -target_address_space [get_bd_addr_spaces microblaze_0/Data] [get_bd_addr_segs axi_quad_spi_0/aximm/MEM0] -force
@@ -1156,6 +1272,8 @@ proc create_root_design { parentCell } {
   assign_bd_address -offset 0x00000000 -range 0x00010000 -target_address_space [get_bd_addr_spaces microblaze_0/Instruction] [get_bd_addr_segs microblaze_0_local_memory/ilmb_bram_if_cntlr/SLMB/Mem] -force
   assign_bd_address -offset 0x80000000 -range 0x10000000 -target_address_space [get_bd_addr_spaces microblaze_0/Data] [get_bd_addr_segs mig_7series_0/memmap/memaddr] -force
   assign_bd_address -offset 0x80000000 -range 0x10000000 -target_address_space [get_bd_addr_spaces acquisition/axi_dma_0/Data_S2MM] [get_bd_addr_segs mig_7series_0/memmap/memaddr] -force
+  assign_bd_address -offset 0x80000000 -range 0x10000000 -target_address_space [get_bd_addr_spaces exp/axi_dma_0/Data_MM2S] [get_bd_addr_segs mig_7series_0/memmap/memaddr] -force
+  assign_bd_address -offset 0x80000000 -range 0x10000000 -target_address_space [get_bd_addr_spaces exp/axi_dma_0/Data_S2MM] [get_bd_addr_segs mig_7series_0/memmap/memaddr] -force
   assign_bd_address -offset 0x80000000 -range 0x10000000 -target_address_space [get_bd_addr_spaces rfft/axi_dma_0/Data_SG] [get_bd_addr_segs mig_7series_0/memmap/memaddr] -force
   assign_bd_address -offset 0x80000000 -range 0x10000000 -target_address_space [get_bd_addr_spaces rfft/axi_dma_0/Data_MM2S] [get_bd_addr_segs mig_7series_0/memmap/memaddr] -force
   assign_bd_address -offset 0x80000000 -range 0x10000000 -target_address_space [get_bd_addr_spaces rfft/axi_dma_0/Data_S2MM] [get_bd_addr_segs mig_7series_0/memmap/memaddr] -force
@@ -1167,15 +1285,37 @@ proc create_root_design { parentCell } {
   exclude_bd_addr_seg -offset 0x41E00000 -range 0x00010000 -target_address_space [get_bd_addr_spaces acquisition/axi_dma_0/Data_S2MM] [get_bd_addr_segs acquisition/axi_dma_0/S_AXI_LITE/Reg]
   exclude_bd_addr_seg -offset 0x41E10000 -range 0x00010000 -target_address_space [get_bd_addr_spaces acquisition/axi_dma_0/Data_S2MM] [get_bd_addr_segs rfft/axi_dma_0/S_AXI_LITE/Reg]
   exclude_bd_addr_seg -offset 0x41E20000 -range 0x00010000 -target_address_space [get_bd_addr_spaces acquisition/axi_dma_0/Data_S2MM] [get_bd_addr_segs tcu/axi_dma_0/S_AXI_LITE/Reg]
+  exclude_bd_addr_seg -offset 0x41E30000 -range 0x00010000 -target_address_space [get_bd_addr_spaces acquisition/axi_dma_0/Data_S2MM] [get_bd_addr_segs exp/axi_dma_0/S_AXI_LITE/Reg]
   exclude_bd_addr_seg -offset 0x40000000 -range 0x00010000 -target_address_space [get_bd_addr_spaces acquisition/axi_dma_0/Data_S2MM] [get_bd_addr_segs acquisition/axi_gpio_0/S_AXI/Reg]
   exclude_bd_addr_seg -offset 0x41200000 -range 0x00010000 -target_address_space [get_bd_addr_spaces acquisition/axi_dma_0/Data_S2MM] [get_bd_addr_segs axi_intc_0/S_AXI/Reg]
   exclude_bd_addr_seg -offset 0x44A10000 -range 0x00010000 -target_address_space [get_bd_addr_spaces acquisition/axi_dma_0/Data_S2MM] [get_bd_addr_segs axi_quad_spi_0/aximm/MEM0]
   exclude_bd_addr_seg -offset 0x44A00000 -range 0x00010000 -target_address_space [get_bd_addr_spaces acquisition/axi_dma_0/Data_S2MM] [get_bd_addr_segs axi_quad_spi_0/AXI_LITE/Reg]
   exclude_bd_addr_seg -offset 0x41C00000 -range 0x00010000 -target_address_space [get_bd_addr_spaces acquisition/axi_dma_0/Data_S2MM] [get_bd_addr_segs axi_timer_0/S_AXI/Reg]
   exclude_bd_addr_seg -offset 0x40600000 -range 0x00010000 -target_address_space [get_bd_addr_spaces acquisition/axi_dma_0/Data_S2MM] [get_bd_addr_segs axi_uartlite_0/S_AXI/Reg]
+  exclude_bd_addr_seg -offset 0x41E00000 -range 0x00010000 -target_address_space [get_bd_addr_spaces exp/axi_dma_0/Data_MM2S] [get_bd_addr_segs acquisition/axi_dma_0/S_AXI_LITE/Reg]
+  exclude_bd_addr_seg -offset 0x41E30000 -range 0x00010000 -target_address_space [get_bd_addr_spaces exp/axi_dma_0/Data_MM2S] [get_bd_addr_segs exp/axi_dma_0/S_AXI_LITE/Reg]
+  exclude_bd_addr_seg -offset 0x41E10000 -range 0x00010000 -target_address_space [get_bd_addr_spaces exp/axi_dma_0/Data_MM2S] [get_bd_addr_segs rfft/axi_dma_0/S_AXI_LITE/Reg]
+  exclude_bd_addr_seg -offset 0x41E20000 -range 0x00010000 -target_address_space [get_bd_addr_spaces exp/axi_dma_0/Data_MM2S] [get_bd_addr_segs tcu/axi_dma_0/S_AXI_LITE/Reg]
+  exclude_bd_addr_seg -offset 0x40000000 -range 0x00010000 -target_address_space [get_bd_addr_spaces exp/axi_dma_0/Data_MM2S] [get_bd_addr_segs acquisition/axi_gpio_0/S_AXI/Reg]
+  exclude_bd_addr_seg -offset 0x41200000 -range 0x00010000 -target_address_space [get_bd_addr_spaces exp/axi_dma_0/Data_MM2S] [get_bd_addr_segs axi_intc_0/S_AXI/Reg]
+  exclude_bd_addr_seg -offset 0x44A10000 -range 0x00010000 -target_address_space [get_bd_addr_spaces exp/axi_dma_0/Data_MM2S] [get_bd_addr_segs axi_quad_spi_0/aximm/MEM0]
+  exclude_bd_addr_seg -offset 0x44A00000 -range 0x00010000 -target_address_space [get_bd_addr_spaces exp/axi_dma_0/Data_MM2S] [get_bd_addr_segs axi_quad_spi_0/AXI_LITE/Reg]
+  exclude_bd_addr_seg -offset 0x41C00000 -range 0x00010000 -target_address_space [get_bd_addr_spaces exp/axi_dma_0/Data_MM2S] [get_bd_addr_segs axi_timer_0/S_AXI/Reg]
+  exclude_bd_addr_seg -offset 0x40600000 -range 0x00010000 -target_address_space [get_bd_addr_spaces exp/axi_dma_0/Data_MM2S] [get_bd_addr_segs axi_uartlite_0/S_AXI/Reg]
+  exclude_bd_addr_seg -offset 0x41E00000 -range 0x00010000 -target_address_space [get_bd_addr_spaces exp/axi_dma_0/Data_S2MM] [get_bd_addr_segs acquisition/axi_dma_0/S_AXI_LITE/Reg]
+  exclude_bd_addr_seg -offset 0x41E30000 -range 0x00010000 -target_address_space [get_bd_addr_spaces exp/axi_dma_0/Data_S2MM] [get_bd_addr_segs exp/axi_dma_0/S_AXI_LITE/Reg]
+  exclude_bd_addr_seg -offset 0x41E10000 -range 0x00010000 -target_address_space [get_bd_addr_spaces exp/axi_dma_0/Data_S2MM] [get_bd_addr_segs rfft/axi_dma_0/S_AXI_LITE/Reg]
+  exclude_bd_addr_seg -offset 0x41E20000 -range 0x00010000 -target_address_space [get_bd_addr_spaces exp/axi_dma_0/Data_S2MM] [get_bd_addr_segs tcu/axi_dma_0/S_AXI_LITE/Reg]
+  exclude_bd_addr_seg -offset 0x40000000 -range 0x00010000 -target_address_space [get_bd_addr_spaces exp/axi_dma_0/Data_S2MM] [get_bd_addr_segs acquisition/axi_gpio_0/S_AXI/Reg]
+  exclude_bd_addr_seg -offset 0x41200000 -range 0x00010000 -target_address_space [get_bd_addr_spaces exp/axi_dma_0/Data_S2MM] [get_bd_addr_segs axi_intc_0/S_AXI/Reg]
+  exclude_bd_addr_seg -offset 0x44A10000 -range 0x00010000 -target_address_space [get_bd_addr_spaces exp/axi_dma_0/Data_S2MM] [get_bd_addr_segs axi_quad_spi_0/aximm/MEM0]
+  exclude_bd_addr_seg -offset 0x44A00000 -range 0x00010000 -target_address_space [get_bd_addr_spaces exp/axi_dma_0/Data_S2MM] [get_bd_addr_segs axi_quad_spi_0/AXI_LITE/Reg]
+  exclude_bd_addr_seg -offset 0x41C00000 -range 0x00010000 -target_address_space [get_bd_addr_spaces exp/axi_dma_0/Data_S2MM] [get_bd_addr_segs axi_timer_0/S_AXI/Reg]
+  exclude_bd_addr_seg -offset 0x40600000 -range 0x00010000 -target_address_space [get_bd_addr_spaces exp/axi_dma_0/Data_S2MM] [get_bd_addr_segs axi_uartlite_0/S_AXI/Reg]
   exclude_bd_addr_seg -offset 0x41E00000 -range 0x00010000 -target_address_space [get_bd_addr_spaces rfft/axi_dma_0/Data_MM2S] [get_bd_addr_segs acquisition/axi_dma_0/S_AXI_LITE/Reg]
   exclude_bd_addr_seg -offset 0x41E10000 -range 0x00010000 -target_address_space [get_bd_addr_spaces rfft/axi_dma_0/Data_MM2S] [get_bd_addr_segs rfft/axi_dma_0/S_AXI_LITE/Reg]
   exclude_bd_addr_seg -offset 0x41E20000 -range 0x00010000 -target_address_space [get_bd_addr_spaces rfft/axi_dma_0/Data_MM2S] [get_bd_addr_segs tcu/axi_dma_0/S_AXI_LITE/Reg]
+  exclude_bd_addr_seg -offset 0x41E30000 -range 0x00010000 -target_address_space [get_bd_addr_spaces rfft/axi_dma_0/Data_MM2S] [get_bd_addr_segs exp/axi_dma_0/S_AXI_LITE/Reg]
   exclude_bd_addr_seg -offset 0x40000000 -range 0x00010000 -target_address_space [get_bd_addr_spaces rfft/axi_dma_0/Data_MM2S] [get_bd_addr_segs acquisition/axi_gpio_0/S_AXI/Reg]
   exclude_bd_addr_seg -offset 0x41200000 -range 0x00010000 -target_address_space [get_bd_addr_spaces rfft/axi_dma_0/Data_MM2S] [get_bd_addr_segs axi_intc_0/S_AXI/Reg]
   exclude_bd_addr_seg -offset 0x44A10000 -range 0x00010000 -target_address_space [get_bd_addr_spaces rfft/axi_dma_0/Data_MM2S] [get_bd_addr_segs axi_quad_spi_0/aximm/MEM0]
@@ -1185,6 +1325,7 @@ proc create_root_design { parentCell } {
   exclude_bd_addr_seg -offset 0x41E00000 -range 0x00010000 -target_address_space [get_bd_addr_spaces rfft/axi_dma_0/Data_S2MM] [get_bd_addr_segs acquisition/axi_dma_0/S_AXI_LITE/Reg]
   exclude_bd_addr_seg -offset 0x41E10000 -range 0x00010000 -target_address_space [get_bd_addr_spaces rfft/axi_dma_0/Data_S2MM] [get_bd_addr_segs rfft/axi_dma_0/S_AXI_LITE/Reg]
   exclude_bd_addr_seg -offset 0x41E20000 -range 0x00010000 -target_address_space [get_bd_addr_spaces rfft/axi_dma_0/Data_S2MM] [get_bd_addr_segs tcu/axi_dma_0/S_AXI_LITE/Reg]
+  exclude_bd_addr_seg -offset 0x41E30000 -range 0x00010000 -target_address_space [get_bd_addr_spaces rfft/axi_dma_0/Data_S2MM] [get_bd_addr_segs exp/axi_dma_0/S_AXI_LITE/Reg]
   exclude_bd_addr_seg -offset 0x40000000 -range 0x00010000 -target_address_space [get_bd_addr_spaces rfft/axi_dma_0/Data_S2MM] [get_bd_addr_segs acquisition/axi_gpio_0/S_AXI/Reg]
   exclude_bd_addr_seg -offset 0x41200000 -range 0x00010000 -target_address_space [get_bd_addr_spaces rfft/axi_dma_0/Data_S2MM] [get_bd_addr_segs axi_intc_0/S_AXI/Reg]
   exclude_bd_addr_seg -offset 0x44A10000 -range 0x00010000 -target_address_space [get_bd_addr_spaces rfft/axi_dma_0/Data_S2MM] [get_bd_addr_segs axi_quad_spi_0/aximm/MEM0]
@@ -1194,6 +1335,7 @@ proc create_root_design { parentCell } {
   exclude_bd_addr_seg -offset 0x41E00000 -range 0x00010000 -target_address_space [get_bd_addr_spaces rfft/axi_dma_0/Data_SG] [get_bd_addr_segs acquisition/axi_dma_0/S_AXI_LITE/Reg]
   exclude_bd_addr_seg -offset 0x41E10000 -range 0x00010000 -target_address_space [get_bd_addr_spaces rfft/axi_dma_0/Data_SG] [get_bd_addr_segs rfft/axi_dma_0/S_AXI_LITE/Reg]
   exclude_bd_addr_seg -offset 0x41E20000 -range 0x00010000 -target_address_space [get_bd_addr_spaces rfft/axi_dma_0/Data_SG] [get_bd_addr_segs tcu/axi_dma_0/S_AXI_LITE/Reg]
+  exclude_bd_addr_seg -offset 0x41E30000 -range 0x00010000 -target_address_space [get_bd_addr_spaces rfft/axi_dma_0/Data_SG] [get_bd_addr_segs exp/axi_dma_0/S_AXI_LITE/Reg]
   exclude_bd_addr_seg -offset 0x40000000 -range 0x00010000 -target_address_space [get_bd_addr_spaces rfft/axi_dma_0/Data_SG] [get_bd_addr_segs acquisition/axi_gpio_0/S_AXI/Reg]
   exclude_bd_addr_seg -offset 0x41200000 -range 0x00010000 -target_address_space [get_bd_addr_spaces rfft/axi_dma_0/Data_SG] [get_bd_addr_segs axi_intc_0/S_AXI/Reg]
   exclude_bd_addr_seg -offset 0x44A10000 -range 0x00010000 -target_address_space [get_bd_addr_spaces rfft/axi_dma_0/Data_SG] [get_bd_addr_segs axi_quad_spi_0/aximm/MEM0]
@@ -1203,6 +1345,7 @@ proc create_root_design { parentCell } {
   exclude_bd_addr_seg -offset 0x41E00000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/axi_dma_0/Data_MM2S] [get_bd_addr_segs acquisition/axi_dma_0/S_AXI_LITE/Reg]
   exclude_bd_addr_seg -offset 0x41E10000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/axi_dma_0/Data_MM2S] [get_bd_addr_segs rfft/axi_dma_0/S_AXI_LITE/Reg]
   exclude_bd_addr_seg -offset 0x41E20000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/axi_dma_0/Data_MM2S] [get_bd_addr_segs tcu/axi_dma_0/S_AXI_LITE/Reg]
+  exclude_bd_addr_seg -offset 0x41E30000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/axi_dma_0/Data_MM2S] [get_bd_addr_segs exp/axi_dma_0/S_AXI_LITE/Reg]
   exclude_bd_addr_seg -offset 0x40000000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/axi_dma_0/Data_MM2S] [get_bd_addr_segs acquisition/axi_gpio_0/S_AXI/Reg]
   exclude_bd_addr_seg -offset 0x41200000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/axi_dma_0/Data_MM2S] [get_bd_addr_segs axi_intc_0/S_AXI/Reg]
   exclude_bd_addr_seg -offset 0x44A10000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/axi_dma_0/Data_MM2S] [get_bd_addr_segs axi_quad_spi_0/aximm/MEM0]
@@ -1212,6 +1355,7 @@ proc create_root_design { parentCell } {
   exclude_bd_addr_seg -offset 0x41E00000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_speech_robot_0/m_axi_dram0] [get_bd_addr_segs acquisition/axi_dma_0/S_AXI_LITE/Reg]
   exclude_bd_addr_seg -offset 0x41E10000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_speech_robot_0/m_axi_dram0] [get_bd_addr_segs rfft/axi_dma_0/S_AXI_LITE/Reg]
   exclude_bd_addr_seg -offset 0x41E20000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_speech_robot_0/m_axi_dram0] [get_bd_addr_segs tcu/axi_dma_0/S_AXI_LITE/Reg]
+  exclude_bd_addr_seg -offset 0x41E30000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_speech_robot_0/m_axi_dram0] [get_bd_addr_segs exp/axi_dma_0/S_AXI_LITE/Reg]
   exclude_bd_addr_seg -offset 0x40000000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_speech_robot_0/m_axi_dram0] [get_bd_addr_segs acquisition/axi_gpio_0/S_AXI/Reg]
   exclude_bd_addr_seg -offset 0x41200000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_speech_robot_0/m_axi_dram0] [get_bd_addr_segs axi_intc_0/S_AXI/Reg]
   exclude_bd_addr_seg -offset 0x44A10000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_speech_robot_0/m_axi_dram0] [get_bd_addr_segs axi_quad_spi_0/aximm/MEM0]
@@ -1221,6 +1365,7 @@ proc create_root_design { parentCell } {
   exclude_bd_addr_seg -offset 0x41E00000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_speech_robot_0/m_axi_dram1] [get_bd_addr_segs acquisition/axi_dma_0/S_AXI_LITE/Reg]
   exclude_bd_addr_seg -offset 0x41E10000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_speech_robot_0/m_axi_dram1] [get_bd_addr_segs rfft/axi_dma_0/S_AXI_LITE/Reg]
   exclude_bd_addr_seg -offset 0x41E20000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_speech_robot_0/m_axi_dram1] [get_bd_addr_segs tcu/axi_dma_0/S_AXI_LITE/Reg]
+  exclude_bd_addr_seg -offset 0x41E30000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_speech_robot_0/m_axi_dram1] [get_bd_addr_segs exp/axi_dma_0/S_AXI_LITE/Reg]
   exclude_bd_addr_seg -offset 0x40000000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_speech_robot_0/m_axi_dram1] [get_bd_addr_segs acquisition/axi_gpio_0/S_AXI/Reg]
   exclude_bd_addr_seg -offset 0x41200000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_speech_robot_0/m_axi_dram1] [get_bd_addr_segs axi_intc_0/S_AXI/Reg]
   exclude_bd_addr_seg -offset 0x44A10000 -range 0x00010000 -target_address_space [get_bd_addr_spaces tcu/top_speech_robot_0/m_axi_dram1] [get_bd_addr_segs axi_quad_spi_0/aximm/MEM0]
