@@ -207,7 +207,7 @@ if { $bCheckIPsPassed != 1 } {
 # MIG PRJ FILE TCL PROCs
 ##################################################################
 
-proc write_mig_file_speech_robot_mig_7series_0_1 { str_mig_prj_filepath } {
+proc write_mig_file_speech_robot_mig_7series_0_0 { str_mig_prj_filepath } {
 
    file mkdir [ file dirname "$str_mig_prj_filepath" ]
    set mig_prj_file [open $str_mig_prj_filepath  w+]
@@ -350,7 +350,7 @@ proc write_mig_file_speech_robot_mig_7series_0_1 { str_mig_prj_filepath } {
 
    close $mig_prj_file
 }
-# End of write_mig_file_speech_robot_mig_7series_0_1()
+# End of write_mig_file_speech_robot_mig_7series_0_0()
 
 
 
@@ -867,7 +867,7 @@ proc create_hier_cell_acquisition { parentCell nameHier } {
    CONFIG.M_TDATA_NUM_BYTES {4} \
    CONFIG.S_HAS_TREADY {0} \
    CONFIG.S_TDATA_NUM_BYTES {0} \
-   CONFIG.TDATA_REMAP {32'b11000001100010010010000000000010} \
+   CONFIG.TDATA_REMAP {32'b11000000000100000100001101000100} \
  ] $offset_const_0
 
   # Create instance: scale_const_0, and set properties
@@ -876,7 +876,7 @@ proc create_hier_cell_acquisition { parentCell nameHier } {
    CONFIG.M_TDATA_NUM_BYTES {4} \
    CONFIG.S_HAS_TREADY {0} \
    CONFIG.S_TDATA_NUM_BYTES {0} \
-   CONFIG.TDATA_REMAP {32'b00111100000010010011111001101110} \
+   CONFIG.TDATA_REMAP {32'b00111010100100000110001101000100} \
  ] $scale_const_0
 
   # Create instance: to_float_0, and set properties
@@ -1058,7 +1058,7 @@ proc create_root_design { parentCell } {
   set str_mig_file_name mig_a.prj
   set str_mig_file_path ${str_mig_folder}/${str_mig_file_name}
 
-  write_mig_file_speech_robot_mig_7series_0_1 $str_mig_file_path
+  write_mig_file_speech_robot_mig_7series_0_0 $str_mig_file_path
 
   set_property -dict [ list \
    CONFIG.BOARD_MIG_PARAM {ddr3_sdram} \
