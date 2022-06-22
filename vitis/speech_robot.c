@@ -22,7 +22,7 @@
  * Definitions for packet and frame shapes are derived from the
  * speech commands ML model architecture.
  *
- * https://github.com/petrohi/speech_robot/blob/main/model/speech_commands.ipynb
+ * https://github.com/petrohi/speech-robot/blob/main/model/speech_commands.ipynb
  */
 
 #define ACQ_DT float
@@ -405,12 +405,15 @@ int main() {
      * initiating the transfer and its wait loop must take less
      * than 8ms. Otherwise samples will be dropped.
      */
+
     while (true) {
+
         /*
          * Acquisition uses double-buffering to allow DMA transfer
          * of acqisition packet to proceed into one half of the buffer
          * while the other half is available for copying to RFFT TX buffer.
          */
+
         size_t acq_offset = (1 - acq_reversed) * ACQ_PACKET_SIZE;
 
         error = TENSIL_XILINX_RESULT(XAxiDma_SimpleTransfer(
@@ -442,6 +445,7 @@ int main() {
          * is defined by the model input dimentions, which is 124 so that
          * each frame represents 1 second spectogram at 16Hz sample rate.
          */
+
         XAxiDma_Bd *rfft_rx_bd_head_ptr;
         error = TENSIL_XILINX_RESULT(
             XAxiDma_BdRingAlloc(rfft_tx_ring_ptr, 2, &rfft_rx_bd_head_ptr));
@@ -555,6 +559,7 @@ int main() {
         u8 *dram0_infer_buffer_ptr = drma0_buffer_ptrs[infer_index];
 
         if (rfft_line % MODEL_INPUT_STEP == 0) {
+
             /*
              * If instructions_run_offset is non-zero the current inference
              * did not finish in time to start new inference.
@@ -681,8 +686,8 @@ int main() {
 
                         /*
                          * We copy exponent RX buffer (DDR) to stack (BRAM)
-                         * to make sure that further calculation are happening
-                         * in fast memory.
+                         * to make sure that further calculations are happening
+                         * in the fast memory.
                          */
 
                         memcpy((void *)softmax_buffer,
@@ -727,6 +732,7 @@ int main() {
          * longer than main loop deadline, we schedule copying to be
          * distributed over its iterations.
          */
+
         for (size_t i = 0; i < MODEL_INPUT_WINDOW_NUMBER; i++) {
             int shifted_line = rfft_line - i * MODEL_INPUT_STEP;
 
@@ -741,6 +747,13 @@ int main() {
                 rfft_rx_buffer_ptr + rfft_source_line * RFFT_RX_FRAME_LINE_SIZE;
             u8 *dram0_line_ptr = dram0_prepare_buffer_ptr +
                                  model_dest_line * MODEL_INPUT_LINE_SIZE;
+
+            /*
+             * RFFT values appear in the "channel" dimension of ML model,
+             * which needs to be aligned on TENSIL_ARCHITECTURE_ARRAY_SIZE.
+             * This means that the RFFT value will occupy the first position
+             * of a channles vector and the rest needs to be filled with zeros.
+             */
 
             memset((void *)dram0_line_ptr, 0, MODEL_INPUT_LINE_SIZE);
 
