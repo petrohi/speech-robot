@@ -1,3 +1,5 @@
 *.tmodel
 *.tdata
 *.tprog
+*.bin
+*.prm
