@@ -1,7 +1,7 @@
 # Speech Robot
 
 ```
-tensil rtl -a ./arch/speech_robot.tarch -d 128 -s true -t build
+tensil rtl -a ./arch/speech_robot.tarch -d 128 -s true -t vivado
 ```
 
 ```
