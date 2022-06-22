@@ -1,31 +1,39 @@
 `timescale 1ns / 1ps
 
-module hann_window_to_axism(
+module window_to_axism
+    #(
+    parameter DATA_WIDTH = 32,
+    parameter WINDOW_SIZE = 256,
+    parameter WINDOW_MEM = "hann_window.mem"
+)
+    
+    (
     input wire AXIS_ACLK,
     input wire AXIS_ARESETN,
     output wire M_AXIS_TVALID,
-    output wire [31:0] M_AXIS_TDATA,
+    output wire [DATA_WIDTH - 1:0] M_AXIS_TDATA,
     output wire [1:0] M_AXIS_TSTRB,
     output wire M_AXIS_TLAST,
     input wire M_AXIS_TREADY
 );
+
     reg m_axis_tvalid;
     reg m_axis_tlast;
 
     (* rom_style="block" *)
-    reg [31:0] hann_window [255:0];
-    reg [31:0] m_axis_tdata;
+    reg [DATA_WIDTH - 1:0] window [WINDOW_SIZE - 1:0];
+    reg [DATA_WIDTH - 1:0] m_axis_tdata;
 
     initial
-        $readmemb("hann_window.mem", hann_window, 0, 255);
+    $readmemb(WINDOW_MEM, window, 0, WINDOW_SIZE - 1);
 
-    reg [7:0] packet_counter;
+    reg [$clog2(WINDOW_SIZE) - 1:0] packet_counter;
 
     always@(posedge AXIS_ACLK) begin
         if(!AXIS_ARESETN) begin
             m_axis_tvalid <= 1'b0;
             m_axis_tlast <= 1'b0;
-            m_axis_tdata <= 32'b0;
+            m_axis_tdata <= {DATA_WIDTH{1'b0}};
 
             packet_counter <= 0;
         end else begin
@@ -33,7 +41,7 @@ module hann_window_to_axism(
             m_axis_tlast <= 1'b0;
 
             if (M_AXIS_TREADY) begin
-                if (packet_counter == 255) begin
+                if (packet_counter == WINDOW_SIZE - 1) begin
                     m_axis_tlast <= 1'b1;
                     packet_counter <= 0;
                 end else begin
@@ -41,7 +49,7 @@ module hann_window_to_axism(
                 end
             end
 
-            m_axis_tdata <= hann_window[packet_counter];
+            m_axis_tdata <= window[packet_counter];
         end
     end
 

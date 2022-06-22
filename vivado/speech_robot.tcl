@@ -40,7 +40,7 @@ if { [string first $scripts_vivado_version $current_vivado_version] == -1 } {
 
 # The design that will be created by this Tcl script contains the following 
 # module references:
-# adcs747x_to_axism, hann_window_to_axism, top_speech_robot
+# adcs747x_to_axism, window_to_axism, top_speech_robot
 
 # Please add the sources of those modules before sourcing this Tcl script.
 
@@ -177,7 +177,7 @@ set bCheckModules 1
 if { $bCheckModules == 1 } {
    set list_check_mods "\ 
 adcs747x_to_axism\
-hann_window_to_axism\
+window_to_axism\
 top_speech_robot\
 "
 
@@ -528,7 +528,7 @@ proc create_hier_cell_rfft { parentCell nameHier } {
  ] $fft_config_0
 
   # Create instance: hann_window_to_axism_0, and set properties
-  set block_name hann_window_to_axism
+  set block_name window_to_axism
   set block_cell_name hann_window_to_axism_0
   if { [catch {set hann_window_to_axism_0 [create_bd_cell -type module -reference $block_name $block_cell_name] } errmsg] } {
      catch {common::send_gid_msg -ssname BD::TCL -id 2095 -severity "ERROR" "Unable to add referenced block <$block_name>. Please add the files for ${block_name}'s definition into the project."}
