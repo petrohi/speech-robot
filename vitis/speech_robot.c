@@ -31,12 +31,12 @@
 #define ACQ_PACKET_SIZE (ACQ_PACKET_LENGTH * sizeof(ACQ_DT))
 #define ACQ_PACKET_DOUBLE_SIZE (2 * ACQ_PACKET_SIZE)
 
-#define RFFT_TX_PACKET_SIZE ACQ_PACKET_DOUBLE_SIZE
+#define STFT_TX_PACKET_SIZE ACQ_PACKET_DOUBLE_SIZE
 
-#define RFFT_RX_FRAME_WIDTH (2 * ACQ_PACKET_LENGTH)
-#define RFFT_RX_FRAME_LINE_SIZE (RFFT_RX_FRAME_WIDTH * sizeof(MODEL_DT))
-#define RFFT_RX_FRAME_HEIGHT 124
-#define RFFT_RX_FRAME_SIZE (RFFT_RX_FRAME_HEIGHT * RFFT_RX_FRAME_LINE_SIZE)
+#define STFT_RX_FRAME_WIDTH (2 * ACQ_PACKET_LENGTH)
+#define STFT_RX_FRAME_LINE_SIZE (STFT_RX_FRAME_WIDTH * sizeof(MODEL_DT))
+#define STFT_RX_FRAME_HEIGHT 124
+#define STFT_RX_FRAME_SIZE (STFT_RX_FRAME_HEIGHT * STFT_RX_FRAME_LINE_SIZE)
 
 #define MODEL_DT int16_t
 #define MODEL_DT_MIN INT16_MIN
@@ -46,9 +46,9 @@
 
 #define MODEL_INPUT_WINDOW_NUMBER 4
 
-#define MODEL_INPUT_WIDTH (RFFT_RX_FRAME_WIDTH / 2 + 1)
+#define MODEL_INPUT_WIDTH (STFT_RX_FRAME_WIDTH / 2 + 1)
 #define MODEL_INPUT_LINE_SIZE (MODEL_INPUT_WIDTH * MODEL_VECTOR_SIZE)
-#define MODEL_INPUT_HEIGHT RFFT_RX_FRAME_HEIGHT
+#define MODEL_INPUT_HEIGHT STFT_RX_FRAME_HEIGHT
 #define MODEL_INPUT_STEP (MODEL_INPUT_HEIGHT / MODEL_INPUT_WINDOW_NUMBER)
 #define MODEL_INPUT_SIZE (MODEL_INPUT_HEIGHT * MODEL_INPUT_LINE_SIZE)
 
@@ -118,7 +118,7 @@ static size_t argmax(size_t size, const EXP_DT *buffer, EXP_DT *max) {
 }
 
 XAxiDma acq_axi_dma;
-XAxiDma rfft_axi_dma;
+XAxiDma stft_axi_dma;
 XAxiDma exp_axi_dma;
 XTmrCtr tmr_ctr;
 
@@ -143,23 +143,23 @@ int main() {
      * Initialize various buffers in DDR.
      */
 
-    u8 *rfft_rx_bd_space = BUFFER_START;
-    u8 *rfft_tx_bd_space =
-        rfft_rx_bd_space +
+    u8 *stft_rx_bd_space = BUFFER_START;
+    u8 *stft_tx_bd_space =
+        stft_rx_bd_space +
         BUFFER_ALIGN(XAxiDma_BdRingMemCalc(XAXIDMA_BD_MINIMUM_ALIGNMENT, 1));
 
     u8 *acq_buffer_ptr =
-        rfft_tx_bd_space +
+        stft_tx_bd_space +
         BUFFER_ALIGN(XAxiDma_BdRingMemCalc(XAXIDMA_BD_MINIMUM_ALIGNMENT, 2));
-    u8 *rfft_tx_buffer_ptr =
+    u8 *stft_tx_buffer_ptr =
         acq_buffer_ptr + BUFFER_ALIGN(ACQ_PACKET_DOUBLE_SIZE);
-    u8 *rfft_rx_buffer_ptr =
-        rfft_tx_buffer_ptr + BUFFER_ALIGN(RFFT_TX_PACKET_SIZE);
+    u8 *stft_rx_buffer_ptr =
+        stft_tx_buffer_ptr + BUFFER_ALIGN(STFT_TX_PACKET_SIZE);
 
     u8 *drma0_buffer_ptrs[2];
 
     drma0_buffer_ptrs[0] =
-        rfft_rx_buffer_ptr + BUFFER_ALIGN(RFFT_RX_FRAME_SIZE);
+        stft_rx_buffer_ptr + BUFFER_ALIGN(STFT_RX_FRAME_SIZE);
 
     for (size_t i = 1; i < 2; i++) {
         drma0_buffer_ptrs[i] =
@@ -201,35 +201,35 @@ int main() {
     XGpio_WriteReg(XPAR_GPIO_0_BASEADDR, XGPIO_DATA_OFFSET, 0x1);
 
     /*
-     * Initialize RFFT scatter-gather DMA.
+     * Initialize STFT scatter-gather DMA.
      */
 
-    XAxiDma_Config *rfft_cfg_ptr =
-        XAxiDma_LookupConfig(XPAR_RFFT_AXI_DMA_0_DEVICE_ID);
+    XAxiDma_Config *stft_cfg_ptr =
+        XAxiDma_LookupConfig(XPAR_STFT_AXI_DMA_0_DEVICE_ID);
     error = TENSIL_XILINX_RESULT(
-        XAxiDma_CfgInitialize(&rfft_axi_dma, rfft_cfg_ptr));
+        XAxiDma_CfgInitialize(&stft_axi_dma, stft_cfg_ptr));
 
     if (error)
         goto error;
 
-    XAxiDma_BdRing *rfft_rx_ring_ptr = XAxiDma_GetRxRing(&rfft_axi_dma);
-    XAxiDma_BdRing *rfft_tx_ring_ptr = XAxiDma_GetTxRing(&rfft_axi_dma);
+    XAxiDma_BdRing *stft_rx_ring_ptr = XAxiDma_GetRxRing(&stft_axi_dma);
+    XAxiDma_BdRing *stft_tx_ring_ptr = XAxiDma_GetTxRing(&stft_axi_dma);
 
-    XAxiDma_BdRingIntDisable(rfft_rx_ring_ptr, XAXIDMA_IRQ_ALL_MASK);
-    XAxiDma_BdRingIntDisable(rfft_tx_ring_ptr, XAXIDMA_IRQ_ALL_MASK);
+    XAxiDma_BdRingIntDisable(stft_rx_ring_ptr, XAXIDMA_IRQ_ALL_MASK);
+    XAxiDma_BdRingIntDisable(stft_tx_ring_ptr, XAXIDMA_IRQ_ALL_MASK);
 
-    XAxiDma_BdRingSetCoalesce(rfft_rx_ring_ptr, 1, 0);
-    XAxiDma_BdRingSetCoalesce(rfft_tx_ring_ptr, 1, 0);
+    XAxiDma_BdRingSetCoalesce(stft_rx_ring_ptr, 1, 0);
+    XAxiDma_BdRingSetCoalesce(stft_tx_ring_ptr, 1, 0);
 
     error = TENSIL_XILINX_RESULT(XAxiDma_BdRingCreate(
-        rfft_rx_ring_ptr, (UINTPTR)rfft_rx_bd_space, (UINTPTR)rfft_rx_bd_space,
+        stft_rx_ring_ptr, (UINTPTR)stft_rx_bd_space, (UINTPTR)stft_rx_bd_space,
         XAXIDMA_BD_MINIMUM_ALIGNMENT, 1));
 
     if (error)
         goto error;
 
     error = TENSIL_XILINX_RESULT(XAxiDma_BdRingCreate(
-        rfft_tx_ring_ptr, (UINTPTR)rfft_tx_bd_space, (UINTPTR)rfft_tx_bd_space,
+        stft_tx_ring_ptr, (UINTPTR)stft_tx_bd_space, (UINTPTR)stft_tx_bd_space,
         XAXIDMA_BD_MINIMUM_ALIGNMENT, 2));
 
     if (error)
@@ -239,23 +239,23 @@ int main() {
     XAxiDma_BdClear(&bd_template);
 
     error = TENSIL_XILINX_RESULT(
-        XAxiDma_BdRingClone(rfft_rx_ring_ptr, &bd_template));
+        XAxiDma_BdRingClone(stft_rx_ring_ptr, &bd_template));
 
     if (error)
         goto error;
 
     error = TENSIL_XILINX_RESULT(
-        XAxiDma_BdRingClone(rfft_tx_ring_ptr, &bd_template));
+        XAxiDma_BdRingClone(stft_tx_ring_ptr, &bd_template));
 
     if (error)
         goto error;
 
-    error = TENSIL_XILINX_RESULT(XAxiDma_BdRingStart(rfft_rx_ring_ptr));
+    error = TENSIL_XILINX_RESULT(XAxiDma_BdRingStart(stft_rx_ring_ptr));
 
     if (error)
         goto error;
 
-    error = TENSIL_XILINX_RESULT(XAxiDma_BdRingStart(rfft_tx_ring_ptr));
+    error = TENSIL_XILINX_RESULT(XAxiDma_BdRingStart(stft_tx_ring_ptr));
 
     if (error)
         goto error;
@@ -266,8 +266,8 @@ int main() {
      */
 
     memset((void *)acq_buffer_ptr, 0, ACQ_PACKET_DOUBLE_SIZE);
-    memset((void *)rfft_tx_buffer_ptr, 0, RFFT_TX_PACKET_SIZE);
-    memset((void *)rfft_rx_buffer_ptr, 0, RFFT_RX_FRAME_SIZE);
+    memset((void *)stft_tx_buffer_ptr, 0, STFT_TX_PACKET_SIZE);
+    memset((void *)stft_rx_buffer_ptr, 0, STFT_RX_FRAME_SIZE);
 
     /*
      * TENSIL_ARCHITECTURE parameters come from architecture_params.h
@@ -394,7 +394,7 @@ int main() {
     print("Ready!\r\n");
 
     int acq_reversed = 0;
-    int rfft_line = 0;
+    int stft_line = 0;
 
     size_t instructions_run_offset = 0;
 
@@ -411,7 +411,7 @@ int main() {
         /*
          * Acquisition uses double-buffering to allow DMA transfer
          * of acqisition packet to proceed into one half of the buffer
-         * while the other half is available for copying to RFFT TX buffer.
+         * while the other half is available for copying to STFT TX buffer.
          */
 
         size_t acq_offset = (1 - acq_reversed) * ACQ_PACKET_SIZE;
@@ -426,45 +426,45 @@ int main() {
         acq_reversed = (acq_reversed + 1) % 2;
         acq_offset = (1 - acq_reversed) * ACQ_PACKET_SIZE;
 
-        memcpy((void *)(rfft_tx_buffer_ptr + acq_offset),
+        memcpy((void *)(stft_tx_buffer_ptr + acq_offset),
                (const void *)(acq_buffer_ptr + acq_offset), ACQ_PACKET_SIZE);
 
         /*
-         * Each RFFT TX packet is comprised of two acqisition packet to
+         * Each STFT TX packet is comprised of two acqisition packet to
          * represent a sliding window over acqisition samples. This sliding
          * window is required to produce STFT, which we will call a spectogram.
          *
          * https://en.wikipedia.org/wiki/Short-time_Fourier_transform
          *
-         * Because we minimize copying the RFFT TX packet halves are
+         * Because we minimize copying the STFT TX packet halves are
          * alternated between natural and reverse order. To accomodate
-         * this we use scatter-gather DMA with RFFT. Transfer side (TX)
-         * uses two DMA blocks, each mapping into RFFT TX packet halves
+         * this we use scatter-gather DMA with STFT. Transfer side (TX)
+         * uses two DMA blocks, each mapping into STFT TX packet halves
          * in their current order. Receiving side (RX) uses one block to
-         * place resulting RFFT RX line into RFFT RX frame. This frame height
+         * place resulting STFT RX line into STFT RX frame. This frame height
          * is defined by the model input dimentions, which is 124 so that
          * each frame represents 1 second spectogram at 16Hz sample rate.
          */
 
-        XAxiDma_Bd *rfft_rx_bd_head_ptr;
+        XAxiDma_Bd *stft_rx_bd_head_ptr;
         error = TENSIL_XILINX_RESULT(
-            XAxiDma_BdRingAlloc(rfft_tx_ring_ptr, 2, &rfft_rx_bd_head_ptr));
+            XAxiDma_BdRingAlloc(stft_tx_ring_ptr, 2, &stft_rx_bd_head_ptr));
 
         if (error)
             goto error;
 
-        XAxiDma_Bd *cur_bd_ptr = rfft_rx_bd_head_ptr;
+        XAxiDma_Bd *cur_bd_ptr = stft_rx_bd_head_ptr;
         for (size_t i = 0; i < 2; i++) {
             size_t tx_offset = abs(i - acq_reversed) * ACQ_PACKET_SIZE;
 
             error = TENSIL_XILINX_RESULT(XAxiDma_BdSetBufAddr(
-                cur_bd_ptr, (UINTPTR)(rfft_tx_buffer_ptr + tx_offset)));
+                cur_bd_ptr, (UINTPTR)(stft_tx_buffer_ptr + tx_offset)));
 
             if (error)
                 goto error;
 
             error = TENSIL_XILINX_RESULT(XAxiDma_BdSetLength(
-                cur_bd_ptr, ACQ_PACKET_SIZE, rfft_tx_ring_ptr->MaxTransferLen));
+                cur_bd_ptr, ACQ_PACKET_SIZE, stft_tx_ring_ptr->MaxTransferLen));
 
             if (error)
                 goto error;
@@ -474,34 +474,34 @@ int main() {
             XAxiDma_BdSetId(cur_bd_ptr, i);
 
             cur_bd_ptr =
-                (XAxiDma_Bd *)XAxiDma_BdRingNext(rfft_tx_ring_ptr, cur_bd_ptr);
+                (XAxiDma_Bd *)XAxiDma_BdRingNext(stft_tx_ring_ptr, cur_bd_ptr);
         }
 
         error = TENSIL_XILINX_RESULT(
-            XAxiDma_BdRingToHw(rfft_tx_ring_ptr, 2, rfft_rx_bd_head_ptr));
+            XAxiDma_BdRingToHw(stft_tx_ring_ptr, 2, stft_rx_bd_head_ptr));
 
         if (error)
             goto error;
 
-        XAxiDma_Bd *rfft_rx_head_ptr;
+        XAxiDma_Bd *stft_rx_head_ptr;
         error = TENSIL_XILINX_RESULT(
-            XAxiDma_BdRingAlloc(rfft_rx_ring_ptr, 1, &rfft_rx_head_ptr));
+            XAxiDma_BdRingAlloc(stft_rx_ring_ptr, 1, &stft_rx_head_ptr));
 
         if (error)
             goto error;
 
-        cur_bd_ptr = rfft_rx_head_ptr;
+        cur_bd_ptr = stft_rx_head_ptr;
 
         error = TENSIL_XILINX_RESULT(XAxiDma_BdSetBufAddr(
-            cur_bd_ptr, (UINTPTR)(rfft_rx_buffer_ptr +
-                                  rfft_line * RFFT_RX_FRAME_LINE_SIZE)));
+            cur_bd_ptr, (UINTPTR)(stft_rx_buffer_ptr +
+                                  stft_line * STFT_RX_FRAME_LINE_SIZE)));
 
         if (error)
             goto error;
 
         error = TENSIL_XILINX_RESULT(
-            XAxiDma_BdSetLength(cur_bd_ptr, RFFT_RX_FRAME_LINE_SIZE,
-                                rfft_rx_ring_ptr->MaxTransferLen));
+            XAxiDma_BdSetLength(cur_bd_ptr, STFT_RX_FRAME_LINE_SIZE,
+                                stft_rx_ring_ptr->MaxTransferLen));
 
         if (error)
             goto error;
@@ -510,34 +510,34 @@ int main() {
         XAxiDma_BdSetId(cur_bd_ptr, 0);
 
         error = TENSIL_XILINX_RESULT(
-            XAxiDma_BdRingToHw(rfft_rx_ring_ptr, 1, rfft_rx_head_ptr));
+            XAxiDma_BdRingToHw(stft_rx_ring_ptr, 1, stft_rx_head_ptr));
 
         if (error)
             goto error;
 
-        while (XAxiDma_BdRingFromHw(rfft_rx_ring_ptr, XAXIDMA_ALL_BDS,
-                                    &rfft_rx_head_ptr) != 1 ||
-               XAxiDma_BdRingFromHw(rfft_tx_ring_ptr, XAXIDMA_ALL_BDS,
-                                    &rfft_rx_bd_head_ptr) != 2)
+        while (XAxiDma_BdRingFromHw(stft_rx_ring_ptr, XAXIDMA_ALL_BDS,
+                                    &stft_rx_head_ptr) != 1 ||
+               XAxiDma_BdRingFromHw(stft_tx_ring_ptr, XAXIDMA_ALL_BDS,
+                                    &stft_rx_bd_head_ptr) != 2)
             ;
 
         error = TENSIL_XILINX_RESULT(
-            XAxiDma_BdRingFree(rfft_tx_ring_ptr, 2, rfft_rx_bd_head_ptr));
+            XAxiDma_BdRingFree(stft_tx_ring_ptr, 2, stft_rx_bd_head_ptr));
 
         if (error)
             goto error;
 
         error = TENSIL_XILINX_RESULT(
-            XAxiDma_BdRingFree(rfft_rx_ring_ptr, 1, rfft_rx_head_ptr));
+            XAxiDma_BdRingFree(stft_rx_ring_ptr, 1, stft_rx_head_ptr));
 
         if (error)
             goto error;
 
         /*
-         * To minimize the overhead of copying RFFT lines we setup double-
+         * To minimize the overhead of copying STFT lines we setup double-
          * buffering with two DRAM0 buffers to serve alternatively as an
          * input to ML model. While one buffer is being prepared by copying
-         * spectogram lines from RFFT RX buffer, the other one is being used
+         * spectogram lines from STFT RX buffer, the other one is being used
          * for running ML inference.
          *
          * The MODEL_INPUT_WINDOW_NUMBER determines how many windows are
@@ -552,13 +552,13 @@ int main() {
          * limit to how many windows we can use is the latency of ML inference.
          */
 
-        size_t prepare_index = (rfft_line / MODEL_INPUT_STEP) % 2;
+        size_t prepare_index = (stft_line / MODEL_INPUT_STEP) % 2;
         size_t infer_index = (prepare_index + 1) % 2;
 
         u8 *dram0_prepare_buffer_ptr = drma0_buffer_ptrs[prepare_index];
         u8 *dram0_infer_buffer_ptr = drma0_buffer_ptrs[infer_index];
 
-        if (rfft_line % MODEL_INPUT_STEP == 0) {
+        if (stft_line % MODEL_INPUT_STEP == 0) {
 
             /*
              * If instructions_run_offset is non-zero the current inference
@@ -605,7 +605,7 @@ int main() {
 
             /*
              * Start running TCU program to perform the inference. This
-             * will proceed concurrently with acqistion and RFFT processing
+             * will proceed concurrently with acqistion and STFT processing
              * and may take multiple loop iterations to complete.
              */
 
@@ -727,41 +727,41 @@ int main() {
         }
 
         /*
-         * Copy a spectrogram lines from RFFT RX buffer to DRAM0 prepare
+         * Copy a spectrogram lines from STFT RX buffer to DRAM0 prepare
          * buffer. Since copying the entire spectrogram frame would take
          * longer than main loop deadline, we schedule copying to be
          * distributed over its iterations.
          */
 
         for (size_t i = 0; i < MODEL_INPUT_WINDOW_NUMBER; i++) {
-            int shifted_line = rfft_line - i * MODEL_INPUT_STEP;
+            int shifted_line = stft_line - i * MODEL_INPUT_STEP;
 
-            size_t rfft_source_line = shifted_line < 0
-                                          ? RFFT_RX_FRAME_HEIGHT + shifted_line
+            size_t stft_source_line = shifted_line < 0
+                                          ? STFT_RX_FRAME_HEIGHT + shifted_line
                                           : shifted_line;
             size_t model_dest_line =
-                (rfft_line % MODEL_INPUT_STEP) +
+                (stft_line % MODEL_INPUT_STEP) +
                 (MODEL_INPUT_WINDOW_NUMBER - 1 - i) * MODEL_INPUT_STEP;
 
-            u8 *rfft_rx_line_ptr =
-                rfft_rx_buffer_ptr + rfft_source_line * RFFT_RX_FRAME_LINE_SIZE;
+            u8 *stft_rx_line_ptr =
+                stft_rx_buffer_ptr + stft_source_line * STFT_RX_FRAME_LINE_SIZE;
             u8 *dram0_line_ptr = dram0_prepare_buffer_ptr +
                                  model_dest_line * MODEL_INPUT_LINE_SIZE;
 
             /*
-             * RFFT values appear in the "channel" dimension of ML model,
+             * STFT values appear in the "channel" dimension of ML model,
              * which needs to be aligned on TENSIL_ARCHITECTURE_ARRAY_SIZE.
-             * This means that the RFFT value will occupy the first position
-             * of a channles vector and the rest needs to be filled with zeros.
+             * This means that the STFT value will occupy the first position
+             * of a channels vector and the rest needs to be filled with zeros.
              */
 
             memset((void *)dram0_line_ptr, 0, MODEL_INPUT_LINE_SIZE);
 
             /*
-             * A full line of RFFT RX buffer contains magnitudes of complex
+             * A full line of STFT RX buffer contains magnitudes of complex
              * Fourier transform, which for purely real input produces
              * Hermitian symmetry. Thus MODEL_INPUT_WIDTH is equal to
-             * RFFT_RX_FRAME_WIDTH / 2 + 1 and the rest of RFFT RX line
+             * STFT_RX_FRAME_WIDTH / 2 + 1 and the rest of STFT RX line
              * can be ignored.
              *
              * https://en.wikipedia.org/wiki/Fourier_transform
@@ -774,11 +774,11 @@ int main() {
 
             for (size_t j = 0; j < MODEL_INPUT_WIDTH; j++) {
                 ((MODEL_DT *)dram0_line_ptr)[j * MODEL_VECTOR_LENGTH] = ((
-                    MODEL_DT *)rfft_rx_line_ptr)[RFFT_RX_FRAME_WIDTH - (j + 1)];
+                    MODEL_DT *)stft_rx_line_ptr)[STFT_RX_FRAME_WIDTH - (j + 1)];
             }
         }
 
-        rfft_line = (rfft_line + 1) % RFFT_RX_FRAME_HEIGHT;
+        stft_line = (stft_line + 1) % STFT_RX_FRAME_HEIGHT;
 
         /*
          * For debugging purposes we count the number of cycles
