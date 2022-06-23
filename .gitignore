@@ -1,2 +1,5 @@
 *.bin
 *.prm
+*.f
+*.fir
+*.anno.json
