@@ -1,7 +1,6 @@
 /* SPDX-License-Identifier: Apache-2.0 */
 /* Copyright © 2019-2022 Tensil AI Company */
 
-#include "platform.h"
 #include "xaxidma.h"
 #include "xgpio_l.h"
 #include "xil_printf.h"
@@ -127,8 +126,6 @@ const char *commands[MODEL_OUTPUT_LENGTH] = {
     "right", "stop", "up",   "yes", "_silence_", "_unknown_"};
 
 int main() {
-    init_platform();
-
     tensil_error_t error = TENSIL_ERROR_NONE;
 
     TENSIL_XILINX_RESULT_FRAME
@@ -709,7 +706,7 @@ int main() {
                         print(commands[max_i]);
 
                         if (max > 0.9) {
-                            print("<-------------\r\n");
+                            print(" <----------------------------\r\n");
                         } else
                             print("\r\n");
 
@@ -801,6 +798,5 @@ int main() {
     }
 
 error:
-    cleanup_platform();
     return 0;
 }
