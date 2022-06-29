@@ -119,22 +119,177 @@ static size_t argmax(size_t size, const EXP_DT *buffer, EXP_DT *max) {
 XAxiDma acq_axi_dma;
 XAxiDma stft_axi_dma;
 XAxiDma exp_axi_dma;
-XTmrCtr tmr_ctr;
 
 const char *commands[MODEL_OUTPUT_LENGTH] = {
     "down",  "go",   "left", "no",  "off",       "on",
     "right", "stop", "up",   "yes", "_silence_", "_unknown_"};
+
+enum motor_direction {
+    MOTOR_DIRECTION_FORWARD = 0x1,
+    MOTOR_DIRECTION_ROTATE_RIGHT = 0x3,
+    MOTOR_DIRECTION_ROTATE_LEFT = 0x0,
+    MOTOR_DIRECTION_BACKWARD = 0x2,
+};
+
+enum command {
+    COMMAND_DOWN = 0,
+    COMMAND_GO = 1,
+    COMMAND_LEFT = 2,
+    COMMAND_NO = 3,
+    COMMAND_OFF = 4,
+    COMMAND_ON = 5,
+    COMMAND_RIGHT = 6,
+    COMMAND_STOP = 7,
+    COMMAND_UP = 8,
+    COMMAND_YES = 9,
+    COMMAND_SILENCE = 10,
+    COMMAND_UNKNOWN = 11,
+};
+
+enum led {
+    LED_0 = 0x1,
+    LED_1 = 0x2,
+    LED_2 = 0x4,
+    LED_3 = 0x8,
+};
+
+struct state {
+    XTmrCtr tmr_ctr_motor0;
+    XTmrCtr tmr_ctr_motor1;
+
+    enum command last_command;
+    size_t ticks_since_last_command;
+};
+
+#define PWM_PERIOD 500000
+
+static void set_motor_speed(struct state *state, float speed) {
+    u32 high_period = (u32)((float)PWM_PERIOD * speed);
+
+    XTmrCtr_PwmDisable(&state->tmr_ctr_motor0);
+    XTmrCtr_PwmDisable(&state->tmr_ctr_motor1);
+
+    if (high_period) {
+        XTmrCtr_PwmConfigure(&state->tmr_ctr_motor0, PWM_PERIOD, high_period);
+        XTmrCtr_PwmConfigure(&state->tmr_ctr_motor1, PWM_PERIOD, high_period);
+
+        XTmrCtr_PwmEnable(&state->tmr_ctr_motor0);
+        XTmrCtr_PwmEnable(&state->tmr_ctr_motor1);
+    }
+}
+
+static void set_motor_direction(enum motor_direction direction) {
+    XGpio_WriteReg(XPAR_MOTOR_DIR_GPIO_0_BASEADDR, XGPIO_DATA_OFFSET,
+                   direction);
+}
+
+static void set_leds(int leds) {
+    XGpio_WriteReg(XPAR_LED_GPIO_0_BASEADDR, XGPIO_DATA_OFFSET, leds);
+}
+
+static float get_command_motor_speed(enum command command) {
+    switch (command) {
+    case COMMAND_GO:
+    case COMMAND_LEFT:
+    case COMMAND_RIGHT:
+        return 0.25;
+    default:
+        return 0;
+    }
+}
+
+static float get_command_motor_direction(enum command command) {
+    switch (command) {
+    case COMMAND_LEFT:
+        return MOTOR_DIRECTION_ROTATE_LEFT;
+    case COMMAND_RIGHT:
+        return MOTOR_DIRECTION_ROTATE_RIGHT;
+    default:
+        return MOTOR_DIRECTION_FORWARD;
+    }
+}
+
+static float get_command_leds(enum command command) {
+    switch (command) {
+    case COMMAND_GO:
+        return LED_0 | LED_2;
+    case COMMAND_LEFT:
+        return LED_1 | LED_2;
+    case COMMAND_RIGHT:
+        return LED_0 | LED_3;
+    default:
+        return 0;
+    }
+}
+
+static bool is_known_command(enum command command) {
+    switch (command) {
+    case COMMAND_GO:
+    case COMMAND_LEFT:
+    case COMMAND_RIGHT:
+    case COMMAND_STOP:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool handle_command(struct state *state, enum command command) {
+    if (is_known_command(command) && state->last_command != command &&
+        /**
+         * Let the command run for the period of 2 full spectogram frames
+         */
+        state->ticks_since_last_command > 2 * STFT_RX_FRAME_HEIGHT) {
+
+        set_motor_speed(state, get_command_motor_speed(command));
+        set_motor_direction(get_command_motor_direction(command));
+
+        return true;
+    }
+
+    return false;
+}
+
+static void tick(struct state *state) { state->ticks_since_last_command++; }
+
+struct state state;
+
+static tensil_error_t state_init(struct state *state) {
+    TENSIL_XILINX_RESULT_FRAME
+
+    tensil_error_t error = TENSIL_ERROR_NONE;
+
+    error = TENSIL_XILINX_RESULT(XTmrCtr_Initialize(
+        &state->tmr_ctr_motor0, XPAR_MOTOR_EN_TIMER_0_DEVICE_ID));
+
+    if (error)
+        return error;
+
+    error = TENSIL_XILINX_RESULT(XTmrCtr_Initialize(
+        &state->tmr_ctr_motor1, XPAR_MOTOR_EN_TIMER_1_DEVICE_ID));
+
+    if (error)
+        return error;
+
+    state->last_command = COMMAND_UNKNOWN;
+    state->ticks_since_last_command = 0;
+
+    set_motor_direction(0);
+    set_motor_speed(state, 0);
+
+    return TENSIL_ERROR_NONE;
+}
 
 int main() {
     tensil_error_t error = TENSIL_ERROR_NONE;
 
     TENSIL_XILINX_RESULT_FRAME
 
-    error = TENSIL_XILINX_RESULT(
-        XTmrCtr_Initialize(&tmr_ctr, XPAR_TMRCTR_0_DEVICE_ID));
+    /*
+     * Flash all LEDs to indicate initialization.
+     */
 
-    if (error)
-        goto error;
+    set_leds(LED_0 | LED_1 | LED_2 | LED_3);
 
     /*
      * Initialize various buffers in DDR.
@@ -195,7 +350,8 @@ int main() {
      * AXI DMA will upset SPI packet counter.
      */
 
-    XGpio_WriteReg(XPAR_GPIO_0_BASEADDR, XGPIO_DATA_OFFSET, 0x1);
+    XGpio_WriteReg(XPAR_ACQUISITION_AXI_GPIO_0_BASEADDR, XGPIO_DATA_OFFSET,
+                   0x1);
 
     /*
      * Initialize STFT scatter-gather DMA.
@@ -388,7 +544,12 @@ int main() {
     if (error)
         goto error;
 
-    print("Ready!\r\n");
+    error = state_init(&state);
+
+    if (error)
+        goto error;
+
+    set_leds(0);
 
     int acq_reversed = 0;
     int stft_line = 0;
@@ -706,6 +867,9 @@ int main() {
                         print(commands[max_i]);
 
                         if (max > 0.9) {
+                            if (handle_command(&state, max_i))
+                                set_leds(get_command_leds(max_i));
+
                             print(" <----------------------------\r\n");
                         } else
                             print("\r\n");
@@ -777,24 +941,10 @@ int main() {
 
         stft_line = (stft_line + 1) % STFT_RX_FRAME_HEIGHT;
 
-        /*
-         * For debugging purposes we count the number of cycles
-         * being spent waiting for the next acquisition packet.
-         *
-         * We report if this number drops below 100,000 cycles (1ms).
-         */
-
-        XTmrCtr_Reset(&tmr_ctr, 0);
-        XTmrCtr_Start(&tmr_ctr, 0);
+        tick(&state);
 
         while (XAxiDma_Busy(&acq_axi_dma, XAXIDMA_DEVICE_TO_DMA))
             ;
-
-        XTmrCtr_Stop(&tmr_ctr, 0);
-        u32 cycles = XTmrCtr_GetValue(&tmr_ctr, 0);
-
-        if (cycles < 100000)
-            xil_printf("CYCLES: %d\r\n", cycles);
     }
 
 error:
