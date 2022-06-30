@@ -157,8 +157,8 @@ struct state {
     XTmrCtr tmr_ctr_motor0;
     XTmrCtr tmr_ctr_motor1;
 
-    enum command last_command;
-    size_t ticks_since_last_command;
+    enum command current_command;
+    size_t debounce_ticks;
 };
 
 #define PWM_PERIOD 500000
@@ -183,10 +183,6 @@ static void set_motor_direction(enum motor_direction direction) {
                    direction);
 }
 
-static void set_leds(int leds) {
-    XGpio_WriteReg(XPAR_LED_GPIO_0_BASEADDR, XGPIO_DATA_OFFSET, leds);
-}
-
 static float get_command_motor_speed(enum command command) {
     switch (command) {
     case COMMAND_GO:
@@ -209,19 +205,6 @@ static float get_command_motor_direction(enum command command) {
     }
 }
 
-static float get_command_leds(enum command command) {
-    switch (command) {
-    case COMMAND_GO:
-        return LED_0 | LED_2;
-    case COMMAND_LEFT:
-        return LED_1 | LED_2;
-    case COMMAND_RIGHT:
-        return LED_0 | LED_3;
-    default:
-        return 0;
-    }
-}
-
 static bool is_known_command(enum command command) {
     switch (command) {
     case COMMAND_GO:
@@ -234,15 +217,34 @@ static bool is_known_command(enum command command) {
     }
 }
 
-static bool handle_command(struct state *state, enum command command) {
-    if (is_known_command(command) && state->last_command != command &&
-        /**
-         * Let the command run for the period of 2 full spectogram frames
-         */
-        state->ticks_since_last_command > 2 * STFT_RX_FRAME_HEIGHT) {
+static float get_command_probability_threshold(enum command command) {
+    switch (command) {
+    case COMMAND_GO:
+        return 0.6;
+    case COMMAND_STOP:
+        return 0.7;
+    default:
+        return 0.8;
+    }
+}
+
+/**
+ * Let the command run for the period of 1 full spectogram frame,
+ * assuming `tick` is called for every spectogram line
+ */
+#define MAX_DEBOUNCE_TICKS STFT_RX_FRAME_HEIGHT
+
+static bool handle_event(struct state *state, enum command command,
+                         double probability) {
+    if (!state->debounce_ticks && is_known_command(command) &&
+        state->current_command != command &&
+        probability > get_command_probability_threshold(command)) {
 
         set_motor_speed(state, get_command_motor_speed(command));
         set_motor_direction(get_command_motor_direction(command));
+
+        state->current_command = command;
+        state->debounce_ticks = MAX_DEBOUNCE_TICKS;
 
         return true;
     }
@@ -250,9 +252,10 @@ static bool handle_command(struct state *state, enum command command) {
     return false;
 }
 
-static void tick(struct state *state) { state->ticks_since_last_command++; }
-
-struct state state;
+static void tick(struct state *state) {
+    if (state->debounce_ticks)
+        state->debounce_ticks--;
+}
 
 static tensil_error_t state_init(struct state *state) {
     TENSIL_XILINX_RESULT_FRAME
@@ -271,13 +274,34 @@ static tensil_error_t state_init(struct state *state) {
     if (error)
         return error;
 
-    state->last_command = COMMAND_UNKNOWN;
-    state->ticks_since_last_command = 0;
+    state->current_command = COMMAND_STOP;
+    state->debounce_ticks = MAX_DEBOUNCE_TICKS;
 
     set_motor_direction(0);
     set_motor_speed(state, 0);
 
     return TENSIL_ERROR_NONE;
+}
+
+struct state state;
+
+static void set_leds(int leds) {
+    XGpio_WriteReg(XPAR_LED_GPIO_0_BASEADDR, XGPIO_DATA_OFFSET, leds);
+}
+
+static float get_command_leds(enum command command) {
+    switch (command) {
+    case COMMAND_GO:
+        return LED_0;
+    case COMMAND_LEFT:
+        return LED_1;
+    case COMMAND_RIGHT:
+        return LED_2;
+    case COMMAND_STOP:
+        return LED_3;
+    default:
+        return 0;
+    }
 }
 
 int main() {
@@ -549,7 +573,7 @@ int main() {
     if (error)
         goto error;
 
-    set_leds(0);
+    set_leds(get_command_leds(state.current_command));
 
     int acq_reversed = 0;
     int stft_line = 0;
@@ -807,7 +831,7 @@ int main() {
                          * predictions which can be used by argmax.
                          *
                          * But, in order to provide a better basis for
-                         * confidence thresholding we perform softmax function.
+                         * probability thresholding we perform softmax function.
                          * This function normalizes the output of the model to a
                          * probability distribution over predicted output
                          * classes.
@@ -866,11 +890,9 @@ int main() {
                         print(" ");
                         print(commands[max_i]);
 
-                        if (max > 0.9) {
-                            if (handle_command(&state, max_i))
-                                set_leds(get_command_leds(max_i));
-
-                            print(" <----------------------------\r\n");
+                        if (handle_event(&state, max_i, max)) {
+                            set_leds(get_command_leds(max_i));
+                            print(" <<<\r\n");
                         } else
                             print("\r\n");
 
