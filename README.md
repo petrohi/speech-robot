@@ -1,8 +1,6 @@
 # Speech Robot
 
-[![Demo](/doc/demo.gif)](https://vimeo.com/728669319)
-
-Click to see full video.
+[![Demo](/doc/demo.gif)](https://vimeo.com/728669319 "Click to see full video")
 
 ## Blog
 
