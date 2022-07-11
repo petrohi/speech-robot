@@ -1,13 +1,8 @@
 # Speech Robot
 
-```
-tensil rtl -a ./arch/speech_robot.tarch -d 128 -s true -t vivado
-```
+[![Demo](/doc/demo.gif)](https://vimeo.com/728669319 "Click to see full video")
 
-```
-tensil compile -a ./arch/speech_robot.tarch -m ./model/speech_commands.onnx -o "dense_1" -t model
-```
+## Blog
 
-```
-tensil emulate -m ./model/speech_commands_onnx_speech_robot.tmodel -i ./model/speech_commands_input_25x8.csv -r 25
-```
+- [Building speech controlled robot with Tensil and Arty A7 - Part I](https://k155la3.blog/2022/06/26/building-speech-controlled-robot-with-tensil-and-arty-a7-part1/)
+- [Building speech controlled robot with Tensil and Arty A7 - Part II](https://k155la3.blog/2022/07/01/building-speech-controlled-robot-with-tensil-and-arty-a7-part2/)
